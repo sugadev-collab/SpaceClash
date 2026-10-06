@@ -41,7 +41,8 @@ const CATS = [['all','All'],['resource','Resources'],['defense','Defense'],['arm
 
 // ---- state ----
 let renderer, scene, camera, controls, composer, sky, initCam;
-let stationTex=null, planet=null, moon=null, starFlare=null, commandCenter=null;
+let stationTex=null, planet=null, moon=null, starFlare=null, commandCenter=null, platform=null, stars=null;
+const patrol=[];
 const clock = new THREE.Clock();
 const buildings=[], occupied=new Set(), interactives=[];
 const effects=[], enemies=[], fighters=[], projectiles=[], deploying=[], asteroids=[];
@@ -93,12 +94,11 @@ manager.onError=(url)=>showLoadError('asset: '+url);
 function showLoadError(msg){ const p=document.querySelector('#loader p'); if(p)p.textContent='ERROR: '+msg; console.error(msg); }
 
 // ============================================================
-//  NEBULA SKY DOMES (GLB skyboxes; classic jpg dome as fallback)
+//  NEBULA SKY DOMES (2 GLB skyboxes; classic jpg dome as hidden fallback)
 // ============================================================
 const SKIES=[
-  {id:'deep',   label:'DEEP',    name:'DEEP NEBULA',  file:'./3dmodels/alien_space_nebula_2_skybox.glb'},
-  {id:'core',   label:'CORE',    name:'ALIEN CORE',   file:'./3dmodels/alien_space_nebula_1_skybox.glb'},
-  {id:'classic',label:'CLASSIC', name:'CLASSIC STARS',file:null},
+  {id:'deep',label:'DEEP',name:'DEEP NEBULA',file:'./3dmodels/alien_space_nebula_2_skybox.glb'},
+  {id:'core',label:'CORE',name:'ALIEN CORE', file:'./3dmodels/alien_space_nebula_1_skybox.glb'},
 ];
 let skyIndex=0;
 try{ const saved=localStorage.getItem('stellar-sky'); const i=SKIES.findIndex(s=>s.id===saved); skyIndex=i>=0?i:0; }catch(e){}
@@ -107,23 +107,42 @@ let skyLoading=false;
 
 function makeClassicSky(){ return new THREE.Mesh(new THREE.SphereGeometry(800,48,32),new THREE.MeshBasicMaterial({map:nebulaTex,side:THREE.BackSide,depthWrite:false,fog:false})); }
 
+// Reject textures that are flat/bright (e.g. a metallicRoughness map) — those would render as a white screen.
+function flatBright(tex){ try{ const img=tex&&tex.image; if(!img||!img.width)return false;
+  const cv=flatBright.cv||(flatBright.cv=document.createElement('canvas')); cv.width=32; cv.height=16;
+  const cx=cv.getContext('2d'); cx.drawImage(img,0,0,32,16); const d=cx.getImageData(0,0,32,16).data;
+  let l=0; for(let i=0;i<d.length;i+=4)l+=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
+  return l/(d.length/4)>0.78; }catch(e){ return false; } }
+
+function domeTexture(sm){
+  let tex=sm.map||sm.emissiveMap||null;
+  if(tex&&flatBright(tex))tex=(sm.emissiveMap&&sm.emissiveMap!==tex)?sm.emissiveMap:null;
+  return (tex&&!flatBright(tex))?tex:null;
+}
+
 // Normalize a glTF skybox scene into an unlit back-side dome centered on the origin.
+// Returns null when no usable panorama texture is found.
 function prepareDome(gltf){
   const src=gltf.scene||gltf.scenes[0];
   src.updateMatrixWorld(true);
   const sphere=new THREE.Box3().setFromObject(src).getBoundingSphere(new THREE.Sphere());
   const k=760/Math.max(sphere.radius,1e-6);           // outer layer ends up at r≈760, beyond any camera distance
+  let used=0;
   src.traverse(o=>{
     if(o.isLight||o.isCamera){ o.visible=false; return; }  // strip embedded sketchfab lights/cameras
     if(o.isMesh&&o.material){
-      const sm=o.material;
+      const sm=o.material, tex=domeTexture(sm);
+      if(!tex)return;
+      // baseColor-mapped domes (CORE) are shown at authored brightness; emissive-only domes (DEEP) keep their boost.
       const ext=sm.extensions&&sm.extensions['KHR_materials_emissive_strength'];
-      const boost=ext?Math.min(ext.emissiveStrength||1,1.6):1;   // keep the authored nebula brightness
-      const m=new THREE.MeshBasicMaterial({map:sm.map||sm.emissiveMap||null,color:new THREE.Color(boost,boost,boost),side:THREE.BackSide,depthWrite:false,fog:false});
+      const st=ext?(ext.emissiveStrength||1):1;
+      const boost=sm.map?Math.min(st,1.05):Math.min(st,1.6);
+      const m=new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(boost,boost,boost),side:THREE.BackSide,depthWrite:false,fog:false});
       if(sm.transparent){ m.transparent=true; m.opacity=(typeof sm.opacity==='number'?sm.opacity:0.85); }
-      o.material=m; o.frustumCulled=false; o.renderOrder=-10;
+      o.material=m; o.frustumCulled=false; o.renderOrder=-10; used++;
     }
   });
+  if(!used)return null;
   src.scale.setScalar(k);
   const dome=new THREE.Group(); dome.name='skydome'; dome.add(src);
   return dome;
@@ -140,19 +159,22 @@ function applySky(idx){
   const def=SKIES[skyIndex];
   try{ localStorage.setItem('stellar-sky',def.id); }catch(e){}
   const btn=document.getElementById('skybtn'); if(btn&&!skyLoading)btn.textContent=def.label;
-  if(!def.file){ swapSky(makeClassicSky()); return; }
   if(skyCache[def.id]){ swapSky(skyCache[def.id]); return; }
   if(skyLoading)return;                              // one dome download at a time
   skyLoading=true; if(btn)btn.textContent='…';
   toast('LOADING '+def.name+' DOME…');
+  const fail=()=>{ skyLoading=false; if(btn)btn.textContent=def.label;
+    if(SKIES[skyIndex].id===def.id){ swapSky(makeClassicSky()); toast('DOME FAILED — FALLBACK SKY'); } };
   new GLTFLoader().load(def.file,
     (gltf)=>{
-      const dome=prepareDome(gltf); skyCache[def.id]=dome; skyLoading=false;
+      let dome=null; try{ dome=prepareDome(gltf); }catch(e){ console.warn('dome prep failed',e); }
+      skyLoading=false;
+      if(!dome){ fail(); return; }
+      skyCache[def.id]=dome;
       if(SKIES[skyIndex].id===def.id){ swapSky(dome); if(btn)btn.textContent=def.label; toast(def.name+' ✔'); Sound.click(); }
     },
     (xhr)=>{ if(xhr.total&&btn)btn.textContent=Math.min(99,Math.round(xhr.loaded/xhr.total*100))+'%'; },
-    (err)=>{ console.warn('sky load failed',err); skyLoading=false; if(btn)btn.textContent=def.label;
-      if(SKIES[skyIndex].id===def.id)swapSky(makeClassicSky()); });
+    (err)=>{ console.warn('sky load failed',err); fail(); });
 }
 
 // ============================================================
@@ -184,7 +206,7 @@ function buildScene(){
   new RGBELoader().load('./assets/hdri.hdr', (hdr)=>{ scene.environment=pmrem.fromEquirectangular(hdr).texture; hdr.dispose(); pmrem.dispose(); },
     undefined, ()=>{ scene.environment=pmrem.fromEquirectangular(nebulaTex).texture; });
 
-  scene.add(makeStarfield(3400,600));
+  stars=makeStarfield(3400,600); scene.add(stars);
   planet=makePlanet(); scene.add(planet); moon=makeMoon(); scene.add(moon);
   for(let i=0;i<24;i++){const a=makeAsteroid();asteroids.push(a);scene.add(a);}
 
@@ -196,7 +218,9 @@ function buildScene(){
   starFlare=radialSprite('rgba(180,225,255,1)'); starFlare.scale.setScalar(110); starFlare.material.fog=false;
   starFlare.position.copy(star.position).multiplyScalar(6); scene.add(starFlare);
 
-  scene.add(makePlatform());
+  platform=makePlatform(); scene.add(platform);
+  // patrol interceptors circling the base
+  for(let i=0;i<3;i++){ const ship=createFighter(); patrol.push({m:ship,r:PLANE_R*(0.7+0.12*i),sp:0.22+0.06*i,ph:i*2.1,h:5+i*1.7}); scene.add(ship); }
   highlight=makeHighlight(); highlight.visible=false; scene.add(highlight);
   selRing=new THREE.Mesh(new THREE.TorusGeometry(CELL*0.62,0.07,12,48),new THREE.MeshBasicMaterial({color:0x39e6ff}));
   selRing.rotation.x=Math.PI/2; selRing.visible=false; scene.add(selRing);
@@ -286,6 +310,8 @@ function makePlatform(){ const grp=new THREE.Group();
   const top=new THREE.Mesh(new THREE.CylinderGeometry(PLANE_R*0.98,PLANE_R*0.98,0.06,140),new THREE.MeshStandardMaterial({map:stationTex,roughness:0.6,metalness:0.7})); top.position.y=0; top.receiveShadow=true; grp.add(top);
   const rim=new THREE.Mesh(new THREE.TorusGeometry(PLANE_R,0.24,16,160),glow(0x39e6ff,2.8)); rim.rotation.x=Math.PI/2; rim.position.y=0.06; grp.add(rim);
   for(let i=0;i<12;i++){ const a=(i/12)*Math.PI*2; const strut=new THREE.Mesh(new THREE.CylinderGeometry(0.7,1.1,9,12),metal(0x0c0f15,0.6,0.9)); strut.position.set(Math.cos(a)*PLANE_R*0.7,-5.5,Math.sin(a)*PLANE_R*0.7); strut.rotation.z=Math.cos(a)*0.1; strut.rotation.x=-Math.sin(a)*0.1; grp.add(strut); }
+  const thrusters=[]; for(let i=0;i<4;i++){ const a=(i/4)*Math.PI*2+0.4; const th=radialSprite('rgba(120,215,255,1)'); th.position.set(Math.cos(a)*PLANE_R*0.82,-2.4,Math.sin(a)*PLANE_R*0.82); th.scale.setScalar(4.5); grp.add(th); thrusters.push(th); }
+  grp.userData={rim,thrusters};
   const grid=new THREE.Mesh(new THREE.PlaneGeometry(PLANE_R*2,PLANE_R*2),new THREE.MeshBasicMaterial({map:makeGridTexture(),transparent:true,blending:THREE.AdditiveBlending,depthWrite:false})); grid.rotation.x=-Math.PI/2; grid.position.y=0.05; grp.add(grid); return grp; }
 
 function makeGridTexture(){ const size=1024,cv=document.createElement('canvas'); cv.width=cv.height=size; const ctx=cv.getContext('2d'); const half=(GRID/2)*CELL,toPx=w=>((w+half)/(2*half))*size;
@@ -357,7 +383,7 @@ function setupInput(){ const el=renderer.domElement; let down=null;
   el.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,t:performance.now()};});
   el.addEventListener('pointerup',e=>{ if(!down)return; const moved=Math.hypot(e.clientX-down.x,e.clientY-down.y),quick=performance.now()-down.t<350; down=null; if(moved>6||!quick)return; setPointer(e); if(buildType){const h=raycastCell(); if(h&&tryPlace(h.i,h.j)){} else if(h)toast('PAD OCCUPIED');} else selectAtPointer(); });
   el.addEventListener('contextmenu',e=>{e.preventDefault();cancelBuild();});
-  addEventListener('keydown',e=>{if(e.key==='Escape')cancelBuild();}); }
+  addEventListener('keydown',e=>{if(e.key==='Escape'){cancelBuild();closeFleetPanel();}}); }
 
 function setPointer(e){ const r=renderer.domElement.getBoundingClientRect(); pointer.x=((e.clientX-r.left)/r.width)*2-1; pointer.y=-((e.clientY-r.top)/r.height)*2+1; }
 function raycastCell(){ raycaster.setFromCamera(pointer,camera); const p=new THREE.Vector3(); if(!raycaster.ray.intersectPlane(groundPlane,p))return null; const {i,j}=worldToCell(p.x,p.z); return inBounds(i,j)?{i,j}:null; }
@@ -394,7 +420,10 @@ function renderCards(cat){ const cards=document.getElementById('cards'); cards.i
   for(const [type,def] of Object.entries(BUILDINGS)){ if(cat!=='all'&&def.cat!==cat)continue; const card=document.createElement('div'); card.className='card'; card.dataset.type=type; card.innerHTML=`<div class="em">${def.em}</div><div class="nm">${def.name}</div><div class="cost"><b>${def.cost.energy}⚡</b> ${def.cost.crystal}◆</div>`; card.onclick=()=>selectType(type,card); cards.appendChild(card); } }
 function selectType(type,card){ Sound.click(); if(buildType===type){cancelBuild();return;} deselect(); buildType=type; document.querySelectorAll('.card').forEach(c=>c.classList.remove('active')); if(card)card.classList.add('active'); if(ghost){scene.remove(ghost);ghost=null;} ghost=makeGhost(type); scene.add(ghost); }
 
-function wireControls(){ document.getElementById('raid').onclick=startRaid; document.getElementById('attack').onclick=startAttack; document.getElementById('return').onclick=()=>{ if(mode==='attack')endAttack(); };
+function wireControls(){ document.getElementById('raid').onclick=startRaid; document.getElementById('attack').onclick=openFleetPanel; document.getElementById('return').onclick=()=>{ if(mode==='attack')endAttack(); };
+  document.getElementById('fleet-go').onclick=()=>{ Sound.click(); closeFleetPanel(); startAttack(); };
+  document.getElementById('fleet-cancel').onclick=()=>{ Sound.click(); closeFleetPanel(); };
+  document.getElementById('fleet-retreat').onclick=()=>{ if(mode==='attack')endAttack(); };
   const set=document.getElementById('settings'); document.getElementById('settings-btn').onclick=()=>{ set.style.display=(set.style.display==='block')?'none':'block'; }; document.getElementById('close-set').onclick=()=>{ set.style.display='none'; };
   document.getElementById('snd').onclick=()=>{ Sound.toggleMute(); syncSnd(); };
   document.getElementById('vol').oninput=(e)=>Sound.setVolume(e.target.value/100);
@@ -409,8 +438,8 @@ function fleetCap(){ let n=0; for(const b of buildings)if(b.userData.def&&b.user
 function updateHUD(){ const cap=capOf(); resources.energy=Math.min(resources.energy,cap); resources.crystal=Math.min(resources.crystal,cap);
   document.getElementById('energy').textContent=Math.floor(resources.energy);
   document.getElementById('crystal').textContent=Math.floor(resources.crystal);
-  document.getElementById('efill').style.height=(100*resources.energy/cap)+'%';
-  document.getElementById('cfill').style.height=(100*resources.crystal/cap)+'%';
+  document.getElementById('efill').style.width=(100*resources.energy/cap)+'%';
+  document.getElementById('cfill').style.width=(100*resources.crystal/cap)+'%';
   document.getElementById('cell-energy').classList.toggle('full',resources.energy>=cap*0.98);
   document.getElementById('cell-crystal').classList.toggle('full',resources.crystal>=cap*0.98);
   document.getElementById('cell-energy').title=`Energy ${Math.floor(resources.energy)} / ${cap}`;
@@ -423,7 +452,7 @@ function pulse(id){ const el=document.getElementById(id).closest('.rescell'); if
 let toastT; function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),1400); }
 
 // ============================================================
-//  BARACKS / STARPORT — train friendly interceptors
+//  BARRACKS / STARPORT — train friendly interceptors
 // ============================================================
 function trainFighter(){ if(!selected||!(selected.userData.def&&selected.userData.def.trains))return; if(fighters.length>=fleetCap()){toast('FLEET FULL');return;} const cost={energy:60,crystal:30}; if(resources.energy<cost.energy||resources.crystal<cost.crystal){toast('NEED RESOURCES');Sound.error();return;} resources.energy-=cost.energy; resources.crystal-=cost.crystal; spawnFighter(selected.position.clone()); Sound.upgrade(); updateHUD(); }
 function spawnFighter(home){ const m=createFighter(); const a=Math.random()*Math.PI*2; m.position.set(home.x+Math.cos(a)*3,2.4,home.z+Math.sin(a)*3); scene.add(m); fighters.push({mesh:m,hp:90,maxHp:90,cd:0,home,phase:Math.random()*6}); }
@@ -439,7 +468,7 @@ function resetBase(){ clearBase(); preplaceCommand(); resources.energy=1400; res
 // ============================================================
 //  RAID / DEFENSE
 // ============================================================
-function startRaid(){ if(raidActive||mode==='attack')return; const defN=buildings.filter(b=>DEF_TYPES.includes(b.userData.type)).length; const barN=buildings.filter(b=>b.userData.def&&b.userData.def.trains).length; if(defN+barN===0){toast('BUILD DEFENSE FIRST!');Sound.error();return;} raidActive=true; wave++; const n=6+wave*2; for(let i=0;i<n;i++)spawnDrone(); document.getElementById('raid').disabled=true; document.getElementById('attack').style.display='none'; Sound.success(); banner(`⚠ WAVE ${wave} — ${enemies.length} HOSTILES INBOUND`,'#ff8a3c'); }
+function startRaid(){ if(raidActive||mode==='attack')return; closeFleetPanel(); const defN=buildings.filter(b=>DEF_TYPES.includes(b.userData.type)).length; const barN=buildings.filter(b=>b.userData.def&&b.userData.def.trains).length; if(defN+barN===0){toast('BUILD DEFENSE FIRST!');Sound.error();return;} raidActive=true; wave++; const n=6+wave*2; for(let i=0;i<n;i++)spawnDrone(); document.getElementById('raid').disabled=true; document.getElementById('attack').style.display='none'; Sound.success(); banner(`⚠ WAVE ${wave} — ${enemies.length} HOSTILES INBOUND`,'#ff8a3c'); }
 function spawnDrone(){ const g=new THREE.Group(); const body=part(new THREE.ConeGeometry(0.55,1.6,8),new THREE.MeshStandardMaterial({color:0x551015,metalness:0.6,roughness:0.4,emissive:0x220000}),0,0,0); body.rotation.x=Math.PI/2; g.add(body); g.add(part(new THREE.BoxGeometry(1.6,0.12,0.6),metal(0x331015),0,0,0)); g.add(part(new THREE.SphereGeometry(0.26,12,8),glow(0xff2b3c,3),0,0,0.55,false)); g.add(part(new THREE.SphereGeometry(0.2,10,8),glow(0xff6a00,2),0,0,-0.85,false)); const a=Math.random()*Math.PI*2,r=PLANE_R+26+Math.random()*18; g.position.set(Math.cos(a)*r,3+Math.random()*6,Math.sin(a)*r); g.userData={hp:120+wave*18,maxHp:120+wave*18,speed:4+wave*0.4,target:pickTarget(),bob:Math.random()*6}; scene.add(g); enemies.push(g); }
 function pickTarget(){ const valid=buildings.filter(b=>b.userData.type!=='command'&&b.userData.hp>0); return valid.length?valid[Math.floor(Math.random()*valid.length)]:null; }
 
@@ -463,8 +492,23 @@ function destroyBuilding(b){ if(b===commandCenter)return; occupied.delete(key(Ma
 function angDiff(a,b){ let d=b-a; while(d>Math.PI)d-=Math.PI*2; while(d<-Math.PI)d+=Math.PI*2; return d; }
 
 // ============================================================
-//  OFFENSE — attack an AI enemy outpost
+//  OFFENSE — pick fleet, attack an AI enemy outpost
 // ============================================================
+function openFleetPanel(){
+  Sound.click(); cancelBuild(); closeFleetPanel();
+  const list=document.getElementById('fleet-list'); list.innerHTML='';
+  const empty=document.getElementById('fleet-empty'), go=document.getElementById('fleet-go');
+  if(!fighters.length){ empty.style.display='block'; go.disabled=true; }
+  else{
+    empty.style.display='none'; go.disabled=false;
+    fighters.forEach((f,i)=>{ if(i>=14)return; const c=document.createElement('div'); c.className='fchip';
+      c.innerHTML=`<span>🛰</span><span>INTERCEPTOR</span><span class="hp"><i style="width:${Math.max(0,Math.round(100*f.hp/f.maxHp))}%"></i></span>`; list.appendChild(c); });
+    if(fighters.length>14){ const more=document.createElement('div'); more.className='fchip'; more.innerHTML=`<span>+${fighters.length-14} MORE IN HANGAR</span>`; list.appendChild(more); }
+  }
+  document.getElementById('fleet-panel').style.display='block';
+}
+function closeFleetPanel(){ const p=document.getElementById('fleet-panel'); if(p)p.style.display='none'; }
+
 function generateOutpost(){
   enemyGroup=new THREE.Group(); enemyGroup.position.copy(battleCenter); scene.add(enemyGroup);
   enemyPlatform=new THREE.Mesh(new THREE.CylinderGeometry(13,12,1.2,64),metal(0x1a1320,0.5,0.8));
@@ -486,8 +530,11 @@ function startAttack(){
   battleCenter.set(0,0,-PLANE_R*5);
   generateOutpost();
   controls.target.copy(battleCenter); camera.position.set(battleCenter.x+34,battleCenter.y+26,battleCenter.z+44); controls.update();
-  document.getElementById('raid').style.display='none'; document.getElementById('attack').style.display='none';
-  document.getElementById('return').style.display=''; toast('⚔ DEPLOYING FLEET'); Sound.success();
+  document.getElementById('raid').style.display='none'; document.getElementById('attack').style.display='none'; document.getElementById('return').style.display='none';
+  document.getElementById('build-toggle').style.display='none';
+  const bp=document.getElementById('build-panel'); bp.style.display='none'; document.getElementById('build-toggle').classList.remove('active');
+  document.getElementById('fleet-bar').style.display='flex';
+  toast('⚔ DEPLOYING FLEET'); Sound.success();
 }
 function updateAttack(dt,t){
   if(mode!=='attack')return; battleTimer-=dt;
@@ -498,6 +545,8 @@ function updateAttack(dt,t){
       if(tu.cd<=0){ tu.cd=(tu.kind==='missile'?1.6:tu.kind==='sniper'?2.2:tu.kind==='pulse'?0.18:0.42); tu.barrel.getWorldPosition(tmpV); spawnLaser(tmpV,nearest.mesh.position,0xff3b5c); Sound.shoot(); nearest.hp-=tu.dmg;
         if(nearest.hp<=0){ scene.remove(nearest.mesh); const fi=fighters.indexOf(nearest); if(fi>=0)fighters.splice(fi,1); } } } }
   const alive=enemyBuildings.filter(b=>b.userData.hp>0).length;
+  const hp=fighters.reduce((s,f)=>s+Math.max(0,f.hp),0), mx=fighters.reduce((s,f)=>s+f.maxHp,0)||1;
+  const fst=document.getElementById('fleet-status'); if(fst)fst.textContent=`🛰 FLEET ${fighters.length} · ⛨ ${Math.round(100*hp/mx)}%`;
   if(alive===0||fighters.length===0||battleTimer<=0){ endAttack(); return; }
   banner(`⚔ RAIDING OUTPOST — ENEMY: ${alive} · FLEET: ${fighters.length}`,'#ff8a3c');
 }
@@ -513,6 +562,8 @@ function endAttack(){
   const hc=commandCenter?commandCenter.position:new THREE.Vector3(); fighters.forEach((f,i)=>{ f.home=new THREE.Vector3(hc.x+Math.cos(i)*4,2.4,hc.z+Math.sin(i)*4); });
   if(initCam){ camera.position.copy(initCam); controls.target.set(0,2,0); controls.update(); }
   document.getElementById('raid').style.display=''; document.getElementById('attack').style.display=''; document.getElementById('return').style.display='none';
+  document.getElementById('build-toggle').style.display='';
+  document.getElementById('fleet-bar').style.display='none'; closeFleetPanel();
   banner(win?`✓ OUTPOST RAIDED  +${Math.floor(loot.energy)}⚡ +${Math.floor(loot.crystal)}◆`:`⚔ RETREAT — LOOTED +${Math.floor(loot.energy)}⚡ +${Math.floor(loot.crystal)}◆`, win?'#7dffb0':'#ff8a3c');
   setTimeout(()=>{const b=document.getElementById('banner');if(b)b.style.display='none';},3000);
   loot={energy:0,crystal:0}; Sound.success();
@@ -537,6 +588,11 @@ function animate(){ requestAnimationFrame(animate); const dt=Math.min(clock.getD
   for(const a of asteroids){ const u=a.userData; u.orb.a+=u.orb.sp*dt; a.rotation.y+=u.spin; a.rotation.x+=u.spin*0.6;
     a.position.set(Math.cos(u.orb.a)*u.orb.r, u.orb.y+Math.sin(u.orb.a*1.5+u.orb.ph)*u.orb.incl, Math.sin(u.orb.a)*u.orb.r);
     if(u.crystalMat)u.crystalMat.emissiveIntensity=u.base+Math.sin(t*1.8+u.orb.ph)*0.65; }
+  // living-base ambience: rim pulse, thruster flicker, star twinkle, patrol ships
+  if(platform&&platform.userData.rim)platform.userData.rim.material.emissiveIntensity=2.6+Math.sin(t*1.7)*0.8;
+  if(platform&&platform.userData.thrusters)platform.userData.thrusters.forEach((th,i)=>{ th.material.opacity=0.3+0.22*(0.5+0.5*Math.sin(t*6.3+i*1.7)); });
+  if(stars)stars.material.opacity=0.78+0.14*Math.sin(t*0.9);
+  for(const p of patrol){ const a=t*p.sp+p.ph; p.m.position.set(Math.cos(a)*p.r,p.h+Math.sin(a*2.3)*0.9,Math.sin(a)*p.r); p.m.rotation.y=-a; p.m.rotation.z=Math.sin(a)*0.3; }
   for(const b of buildings)if(b.userData.update)b.userData.update(t);
   for(let i=deploying.length-1;i>=0;i--){const d=deploying[i];d.t+=dt;const k=Math.min(1,d.t/0.55),e=1-Math.pow(1-k,3); d.obj.scale.setScalar(0.01+e*0.99); d.obj.position.y=(1-e)*6; if(k>=1){d.obj.scale.setScalar(1);d.obj.position.copy(d.target);deploying.splice(i,1);}}
   if(raidActive) updateRaid(dt,t); else if(mode==='attack') updateAttack(dt,t);

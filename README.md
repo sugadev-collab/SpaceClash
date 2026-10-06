@@ -17,7 +17,7 @@ python3 -m http.server 8000
 - **Defense raids** — waves of enemy drones attack your base; turrets, Tesla coils, railguns and shield projectors fight back.
 - **Attack mode** — train interceptors at Barracks/Starport and send your fleet to raid an AI outpost for loot.
 - **Upgrades & economy** — 5 levels per building, resource capacity, income ticks, save/load/reset via localStorage.
-- **Nebula sky domes** — real glTF skyboxes loaded from `3dmodels/` (switch between DEEP / CORE / CLASSIC in ⚙ Settings).
+- **Nebula sky domes** — real glTF skyboxes loaded from `3dmodels/` (switch between DEEP / CORE in ⚙ Settings).
 - **Crystal asteroid field** — procedurally deformed planetoids with glowing crystal veins, auras and debris rings.
 - **Image-based lighting** — HDRI environment + UnrealBloom post-processing.
 
