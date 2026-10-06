@@ -41,7 +41,7 @@ const CATS = [['all','All'],['resource','Resources'],['defense','Defense'],['arm
 
 // ---- state ----
 let renderer, scene, camera, controls, composer, sky, initCam;
-let stationTex=null, planet=null, moon=null, starFlare=null, commandCenter=null, platform=null, stars=null;
+let stationTex=null, starFlare=null, commandCenter=null, platform=null, stars=null;
 const patrol=[];
 const clock = new THREE.Clock();
 const buildings=[], occupied=new Set(), interactives=[];
@@ -95,6 +95,8 @@ function showLoadError(msg){ const p=document.querySelector('#loader p'); if(p)p
 
 // ============================================================
 //  NEBULA SKY DOMES (2 GLB skyboxes; classic jpg dome as hidden fallback)
+//  Domes retry on failure and are preloaded in the background so a
+//  flaky first request never leaves you on the fallback sky.
 // ============================================================
 const SKIES=[
   {id:'deep',label:'DEEP',name:'DEEP NEBULA',file:'./3dmodels/alien_space_nebula_2_skybox.glb'},
@@ -103,7 +105,7 @@ const SKIES=[
 let skyIndex=0;
 try{ const saved=localStorage.getItem('stellar-sky'); const i=SKIES.findIndex(s=>s.id===saved); skyIndex=i>=0?i:0; }catch(e){}
 const skyCache={};
-let skyLoading=false;
+let skyLoading=false, skyAttempts=0;
 
 function makeClassicSky(){ return new THREE.Mesh(new THREE.SphereGeometry(800,48,32),new THREE.MeshBasicMaterial({map:nebulaTex,side:THREE.BackSide,depthWrite:false,fog:false})); }
 
@@ -114,33 +116,37 @@ function flatBright(tex){ try{ const img=tex&&tex.image; if(!img||!img.width)ret
   let l=0; for(let i=0;i<d.length;i+=4)l+=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
   return l/(d.length/4)>0.78; }catch(e){ return false; } }
 
-function domeTexture(sm){
-  let tex=sm.map||sm.emissiveMap||null;
-  if(tex&&flatBright(tex))tex=(sm.emissiveMap&&sm.emissiveMap!==tex)?sm.emissiveMap:null;
-  return (tex&&!flatBright(tex))?tex:null;
+// Pick the panorama texture of a glTF material: baseColor map first, else the emissive map.
+function pickDomeTexture(sm){
+  const map=sm.map||null, emi=sm.emissiveMap||null;
+  if(map&&!flatBright(map))return map;
+  if(emi&&!flatBright(emi))return emi;
+  return null;
 }
 
-// Normalize a glTF skybox scene into an unlit back-side dome centered on the origin.
+// Normalize a glTF skybox scene into an unlit, opaque back-side dome centered on the origin.
 // Returns null when no usable panorama texture is found.
 function prepareDome(gltf){
   const src=gltf.scene||gltf.scenes[0];
+  if(!src)return null;
   src.updateMatrixWorld(true);
   const sphere=new THREE.Box3().setFromObject(src).getBoundingSphere(new THREE.Sphere());
   const k=760/Math.max(sphere.radius,1e-6);           // outer layer ends up at r≈760, beyond any camera distance
   let used=0;
   src.traverse(o=>{
     if(o.isLight||o.isCamera){ o.visible=false; return; }  // strip embedded sketchfab lights/cameras
-    if(o.isMesh&&o.material){
-      const sm=o.material, tex=domeTexture(sm);
-      if(!tex)return;
-      // baseColor-mapped domes (CORE) are shown at authored brightness; emissive-only domes (DEEP) keep their boost.
-      const ext=sm.extensions&&sm.extensions['KHR_materials_emissive_strength'];
-      const st=ext?(ext.emissiveStrength||1):1;
-      const boost=sm.map?Math.min(st,1.05):Math.min(st,1.6);
-      const m=new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(boost,boost,boost),side:THREE.BackSide,depthWrite:false,fog:false});
-      if(sm.transparent){ m.transparent=true; m.opacity=(typeof sm.opacity==='number'?sm.opacity:0.85); }
-      o.material=m; o.frustumCulled=false; o.renderOrder=-10; used++;
-    }
+    if(!o.isMesh||!o.material)return;
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+    let tex=null;
+    for(const sm of mats){ tex=pickDomeTexture(sm); if(tex)break; }
+    if(!tex)return;
+    const sm0=mats[0];
+    // baseColor-mapped domes (CORE) are shown at authored brightness; emissive-only domes (DEEP) keep their boost.
+    const st=(typeof sm0.emissiveIntensity==='number')?sm0.emissiveIntensity:1;
+    const boost=sm0.map?Math.min(st,1.05):Math.min(st,1.6);
+    const m=new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(boost,boost,boost),side:THREE.BackSide,depthWrite:false,fog:false});
+    m.transparent=false; m.opacity=1;                 // the sky is the backdrop — never blended/dimmed
+    o.material=m; o.frustumCulled=false; o.renderOrder=-10; used++;
   });
   if(!used)return null;
   src.scale.setScalar(k);
@@ -154,7 +160,15 @@ function swapSky(dome){
   scene.add(sky);
 }
 
-function applySky(idx){
+function loadDome(def,onDone,onFail,onProgress){
+  new GLTFLoader().load(def.file,
+    (gltf)=>{ let dome=null; try{ dome=prepareDome(gltf); }catch(e){ console.warn('dome prep failed',def.file,e); }
+      if(dome)onDone(dome); else onFail(); },
+    onProgress,
+    (err)=>{ console.warn('sky load failed',def.file,err); onFail(); });
+}
+
+function applySky(idx,fromRetry){
   skyIndex=((idx%SKIES.length)+SKIES.length)%SKIES.length;
   const def=SKIES[skyIndex];
   try{ localStorage.setItem('stellar-sky',def.id); }catch(e){}
@@ -162,19 +176,25 @@ function applySky(idx){
   if(skyCache[def.id]){ swapSky(skyCache[def.id]); return; }
   if(skyLoading)return;                              // one dome download at a time
   skyLoading=true; if(btn)btn.textContent='…';
-  toast('LOADING '+def.name+' DOME…');
-  const fail=()=>{ skyLoading=false; if(btn)btn.textContent=def.label;
-    if(SKIES[skyIndex].id===def.id){ swapSky(makeClassicSky()); toast('DOME FAILED — FALLBACK SKY'); } };
-  new GLTFLoader().load(def.file,
-    (gltf)=>{
-      let dome=null; try{ dome=prepareDome(gltf); }catch(e){ console.warn('dome prep failed',e); }
-      skyLoading=false;
-      if(!dome){ fail(); return; }
-      skyCache[def.id]=dome;
+  if(!fromRetry)toast('LOADING '+def.name+' DOME…');
+  loadDome(def,
+    (dome)=>{ skyLoading=false; skyAttempts=0; skyCache[def.id]=dome;
       if(SKIES[skyIndex].id===def.id){ swapSky(dome); if(btn)btn.textContent=def.label; toast(def.name+' ✔'); Sound.click(); }
-    },
-    (xhr)=>{ if(xhr.total&&btn)btn.textContent=Math.min(99,Math.round(xhr.loaded/xhr.total*100))+'%'; },
-    (err)=>{ console.warn('sky load failed',err); fail(); });
+      preloadOtherDomes(); },
+    ()=>{ skyLoading=false;
+      if(skyAttempts<3){ skyAttempts++; if(btn)btn.textContent='RETRY '+skyAttempts;
+        setTimeout(()=>{ if(SKIES[skyIndex].id===def.id&&!skyCache[def.id])applySky(skyIndex,true); },1200); }
+      else{ skyAttempts=0; if(btn)btn.textContent=def.label;
+        if(SKIES[skyIndex].id===def.id){ swapSky(makeClassicSky()); toast('DOME FAILED — FALLBACK SKY'); } } },
+    (xhr)=>{ if(xhr.total&&btn)btn.textContent=Math.min(99,Math.round(xhr.loaded/xhr.total*100))+'%'; });
+}
+
+// Quietly fetch the remaining dome(s) so switching themes is instant.
+function preloadOtherDomes(){
+  const rest=SKIES.filter(s=>!skyCache[s.id]);
+  if(!rest.length)return;
+  const def=rest[0];
+  loadDome(def,(dome)=>{ skyCache[def.id]=dome; },()=>{}, ()=>{});
 }
 
 // ============================================================
@@ -207,7 +227,6 @@ function buildScene(){
     undefined, ()=>{ scene.environment=pmrem.fromEquirectangular(nebulaTex).texture; });
 
   stars=makeStarfield(3400,600); scene.add(stars);
-  planet=makePlanet(); scene.add(planet); moon=makeMoon(); scene.add(moon);
   for(let i=0;i<24;i++){const a=makeAsteroid();asteroids.push(a);scene.add(a);}
 
   scene.add(new THREE.HemisphereLight(0x335577,0x05070d,0.4));
@@ -250,18 +269,6 @@ function makeStarfield(count,radius){ const g=new THREE.BufferGeometry(); const 
     c.setHSL(0.55+Math.random()*0.12,0.4,0.7+Math.random()*0.3); col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b; }
   g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('color',new THREE.BufferAttribute(col,3));
   return new THREE.Points(g,new THREE.PointsMaterial({size:1.3,sizeAttenuation:true,vertexColors:true,transparent:true,opacity:0.9,depthWrite:false})); }
-
-function makePlanet(){ const grp=new THREE.Group();
-  const p=new THREE.Mesh(new THREE.SphereGeometry(220,96,96),new THREE.MeshStandardMaterial({map:planetTex,roughness:0.95,metalness:0.05,fog:false}));
-  p.position.set(-360,-210,-580); grp.add(p);
-  const atmo=new THREE.Mesh(new THREE.SphereGeometry(232,96,96),new THREE.ShaderMaterial({transparent:true,side:THREE.BackSide,blending:THREE.AdditiveBlending,fog:false,
-    uniforms:{c:{value:new THREE.Color(0x39a0ff)}},
-    vertexShader:`varying vec3 vN;void main(){vN=normalize(normalMatrix*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-    fragmentShader:`varying vec3 vN;uniform vec3 c;void main(){float i=pow(1.0-abs(vN.z),3.0);gl_FragColor=vec4(c,i*0.6);}`}));
-  atmo.position.copy(p.position); grp.add(atmo); return grp; }
-
-function makeMoon(){ const m=new THREE.Mesh(new THREE.SphereGeometry(26,32,32),new THREE.MeshStandardMaterial({color:0x8a93a3,roughness:1,metalness:0.05,flatShading:true}));
-  m.position.set(200,140,-300); m.userData={a:0,r:380,y:140,sp:0.05}; return m; }
 
 // ---- crystal-bearing asteroid planetoids ----
 const AST_ROCKS=[0x4a4237,0x3c434c,0x333a44,0x45413a,0x2e333d];
@@ -582,8 +589,7 @@ function banner(text,color){ const b=document.getElementById('banner'); b.textCo
 //  LOOP
 // ============================================================
 function animate(){ requestAnimationFrame(animate); const dt=Math.min(clock.getDelta(),0.05),t=clock.elapsedTime;
-  sky.rotation.y+=dt*0.004; if(planet)planet.rotation.y+=dt*0.01;
-  if(moon){moon.userData.a+=moon.userData.sp*dt;moon.position.set(Math.cos(moon.userData.a)*moon.userData.r,moon.userData.y,Math.sin(moon.userData.a)*moon.userData.r);}
+  sky.rotation.y+=dt*0.004;
   if(starFlare)starFlare.material.rotation+=dt*0.1;
   for(const a of asteroids){ const u=a.userData; u.orb.a+=u.orb.sp*dt; a.rotation.y+=u.spin; a.rotation.x+=u.spin*0.6;
     a.position.set(Math.cos(u.orb.a)*u.orb.r, u.orb.y+Math.sin(u.orb.a*1.5+u.orb.ph)*u.orb.incl, Math.sin(u.orb.a)*u.orb.r);
