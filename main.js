@@ -5,6 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // ============================================================
 //  STELLAR CLASH — big base + categorized build + settings (offline)
@@ -92,6 +93,69 @@ manager.onError=(url)=>showLoadError('asset: '+url);
 function showLoadError(msg){ const p=document.querySelector('#loader p'); if(p)p.textContent='ERROR: '+msg; console.error(msg); }
 
 // ============================================================
+//  NEBULA SKY DOMES (GLB skyboxes; classic jpg dome as fallback)
+// ============================================================
+const SKIES=[
+  {id:'deep',   label:'DEEP',    name:'DEEP NEBULA',  file:'./3dmodels/alien_space_nebula_2_skybox.glb'},
+  {id:'core',   label:'CORE',    name:'ALIEN CORE',   file:'./3dmodels/alien_space_nebula_1_skybox.glb'},
+  {id:'classic',label:'CLASSIC', name:'CLASSIC STARS',file:null},
+];
+let skyIndex=0;
+try{ const saved=localStorage.getItem('stellar-sky'); const i=SKIES.findIndex(s=>s.id===saved); skyIndex=i>=0?i:0; }catch(e){}
+const skyCache={};
+let skyLoading=false;
+
+function makeClassicSky(){ return new THREE.Mesh(new THREE.SphereGeometry(800,48,32),new THREE.MeshBasicMaterial({map:nebulaTex,side:THREE.BackSide,depthWrite:false,fog:false})); }
+
+// Normalize a glTF skybox scene into an unlit back-side dome centered on the origin.
+function prepareDome(gltf){
+  const src=gltf.scene||gltf.scenes[0];
+  src.updateMatrixWorld(true);
+  const sphere=new THREE.Box3().setFromObject(src).getBoundingSphere(new THREE.Sphere());
+  const k=760/Math.max(sphere.radius,1e-6);           // outer layer ends up at r≈760, beyond any camera distance
+  src.traverse(o=>{
+    if(o.isLight||o.isCamera){ o.visible=false; return; }  // strip embedded sketchfab lights/cameras
+    if(o.isMesh&&o.material){
+      const sm=o.material;
+      const ext=sm.extensions&&sm.extensions['KHR_materials_emissive_strength'];
+      const boost=ext?Math.min(ext.emissiveStrength||1,1.6):1;   // keep the authored nebula brightness
+      const m=new THREE.MeshBasicMaterial({map:sm.map||sm.emissiveMap||null,color:new THREE.Color(boost,boost,boost),side:THREE.BackSide,depthWrite:false,fog:false});
+      if(sm.transparent){ m.transparent=true; m.opacity=(typeof sm.opacity==='number'?sm.opacity:0.85); }
+      o.material=m; o.frustumCulled=false; o.renderOrder=-10;
+    }
+  });
+  src.scale.setScalar(k);
+  const dome=new THREE.Group(); dome.name='skydome'; dome.add(src);
+  return dome;
+}
+
+function swapSky(dome){
+  if(sky)scene.remove(sky);
+  sky=dome; sky.rotation.y=Math.random()*Math.PI*2;
+  scene.add(sky);
+}
+
+function applySky(idx){
+  skyIndex=((idx%SKIES.length)+SKIES.length)%SKIES.length;
+  const def=SKIES[skyIndex];
+  try{ localStorage.setItem('stellar-sky',def.id); }catch(e){}
+  const btn=document.getElementById('skybtn'); if(btn&&!skyLoading)btn.textContent=def.label;
+  if(!def.file){ swapSky(makeClassicSky()); return; }
+  if(skyCache[def.id]){ swapSky(skyCache[def.id]); return; }
+  if(skyLoading)return;                              // one dome download at a time
+  skyLoading=true; if(btn)btn.textContent='…';
+  toast('LOADING '+def.name+' DOME…');
+  new GLTFLoader().load(def.file,
+    (gltf)=>{
+      const dome=prepareDome(gltf); skyCache[def.id]=dome; skyLoading=false;
+      if(SKIES[skyIndex].id===def.id){ swapSky(dome); if(btn)btn.textContent=def.label; toast(def.name+' ✔'); Sound.click(); }
+    },
+    (xhr)=>{ if(xhr.total&&btn)btn.textContent=Math.min(99,Math.round(xhr.loaded/xhr.total*100))+'%'; },
+    (err)=>{ console.warn('sky load failed',err); skyLoading=false; if(btn)btn.textContent=def.label;
+      if(SKIES[skyIndex].id===def.id)swapSky(makeClassicSky()); });
+}
+
+// ============================================================
 //  MATERIAL HELPERS
 // ============================================================
 const metal=(color,rough=0.4,met=0.92)=>new THREE.MeshStandardMaterial({color,roughness:rough,metalness:met,map:stationTex||null});
@@ -114,7 +178,7 @@ function buildScene(){
 
   scene=new THREE.Scene(); scene.background=new THREE.Color(0x02030a); scene.fog=new THREE.FogExp2(0x02030a,0.0016);
 
-  sky=new THREE.Mesh(new THREE.SphereGeometry(800,48,32),new THREE.MeshBasicMaterial({map:nebulaTex,side:THREE.BackSide,depthWrite:false,fog:false})); scene.add(sky);
+  sky=makeClassicSky(); scene.add(sky);                       // instant fallback dome, upgraded to GLB nebula below
   const pmrem=new THREE.PMREMGenerator(renderer);
   // CC0 HDRI (Poly Haven "dikhololo_night") → realistic image-based lighting + metal reflections
   new RGBELoader().load('./assets/hdri.hdr', (hdr)=>{ scene.environment=pmrem.fromEquirectangular(hdr).texture; hdr.dispose(); pmrem.dispose(); },
@@ -122,7 +186,7 @@ function buildScene(){
 
   scene.add(makeStarfield(3400,600));
   planet=makePlanet(); scene.add(planet); moon=makeMoon(); scene.add(moon);
-  for(let i=0;i<26;i++){const a=makeAsteroid();asteroids.push(a);scene.add(a);}
+  for(let i=0;i<24;i++){const a=makeAsteroid();asteroids.push(a);scene.add(a);}
 
   scene.add(new THREE.HemisphereLight(0x335577,0x05070d,0.4));
   const star=new THREE.DirectionalLight(0xbfe6ff,2.6); star.position.set(60,90,40);
@@ -150,6 +214,7 @@ function buildScene(){
 
   setupInput(); buildDock(); wireControls();
   preplaceCommand(); updateHUD();
+  applySky(skyIndex);                                          // load saved / default GLB nebula dome
   setInterval(tickIncome,1000);
   addEventListener('resize',onResize);
 }
@@ -174,11 +239,47 @@ function makePlanet(){ const grp=new THREE.Group();
 function makeMoon(){ const m=new THREE.Mesh(new THREE.SphereGeometry(26,32,32),new THREE.MeshStandardMaterial({color:0x8a93a3,roughness:1,metalness:0.05,flatShading:true}));
   m.position.set(200,140,-300); m.userData={a:0,r:380,y:140,sp:0.05}; return m; }
 
-function makeAsteroid(){ const s=1+Math.random()*3.5, geo=new THREE.IcosahedronGeometry(s,1), p=geo.attributes.position;
-  for(let i=0;i<p.count;i++)p.setXYZ(i,p.getX(i)*(1+(Math.random()-0.5)*0.5),p.getY(i)*(1+(Math.random()-0.5)*0.5),p.getZ(i)*(1+(Math.random()-0.5)*0.5));
-  geo.computeVertexNormals(); const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0x3a3f4a,roughness:1,metalness:0.1,flatShading:true}));
-  const a=Math.random()*Math.PI*2,r=PLANE_R+12+Math.random()*110; m.position.set(Math.cos(a)*r,-3+Math.random()*12,Math.sin(a)*r);
-  m.userData={spin:(Math.random()-0.5)*0.01,orb:{a,r,y:m.position.y,sp:0.01+Math.random()*0.03}}; return m; }
+// ---- crystal-bearing asteroid planetoids ----
+const AST_ROCKS=[0x4a4237,0x3c434c,0x333a44,0x45413a,0x2e333d];
+const AST_PALS=[
+  {c:0xff8a3c,css:'rgba(255,138,60,1)'},   // amber ore
+  {c:0x39e6ff,css:'rgba(57,230,255,1)'},   // cyan crystal
+  {c:0x9b6bff,css:'rgba(155,107,255,1)'},  // void amethyst
+  {c:0x7dffb0,css:'rgba(125,255,176,1)'},  // verdanium
+];
+function makeAsteroid(){
+  const grp=new THREE.Group();
+  const s=1.1+Math.random()*3.4, seed=Math.random()*1000;
+  const geo=new THREE.IcosahedronGeometry(s,2), p=geo.attributes.position, v=new THREE.Vector3(), n=new THREE.Vector3();
+  for(let i=0;i<p.count;i++){ v.fromBufferAttribute(p,i); n.copy(v).normalize();
+    const d=0.78 + 0.30*(0.5+0.5*Math.sin(n.x*2.3+seed)*Math.sin(n.y*2.9+seed*1.3))
+              + 0.14*(0.5+0.5*Math.sin(n.y*4.7+seed*2.1)*Math.sin(n.z*4.1+seed*0.7))
+              - 0.20*Math.pow(Math.max(0,Math.sin(n.z*1.6+seed*0.3)),8);   // dig an impact crater
+    v.copy(n).multiplyScalar(s*d); p.setXYZ(i,v.x,v.y,v.z); }
+  geo.computeVertexNormals();
+  const rock=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:AST_ROCKS[Math.floor(Math.random()*AST_ROCKS.length)],roughness:0.96,metalness:0.12,flatShading:true}));
+  grp.add(rock);
+  // glowing crystal veins poking out of the rock (one shared pulsing material per asteroid)
+  const pal=AST_PALS[Math.floor(Math.random()*AST_PALS.length)];
+  const crystalMat=new THREE.MeshStandardMaterial({color:0x0c1016,emissive:pal.c,emissiveIntensity:1.6,roughness:0.25,metalness:0.1});
+  const shardGeo=new THREE.OctahedronGeometry(1,0), up=new THREE.Vector3(0,1,0), dir=new THREE.Vector3();
+  const nShards=2+Math.floor(Math.random()*3);
+  for(let i=0;i<nShards;i++){ dir.set(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize();
+    const len=s*(0.45+Math.random()*0.5), w=len*(0.22+Math.random()*0.15);
+    const shard=new THREE.Mesh(shardGeo,crystalMat);
+    shard.position.copy(dir).multiplyScalar(s*0.78);
+    shard.quaternion.setFromUnitVectors(up,dir);
+    shard.rotateX((Math.random()-0.5)*0.6); shard.rotateZ((Math.random()-0.5)*0.6);
+    shard.scale.set(w,len,w); grp.add(shard); }
+  // soft aura + debris ring on the big ones
+  const aura=radialSprite(pal.css); aura.material.opacity=0.16; aura.scale.setScalar(s*4.5); grp.add(aura);
+  if(s>3.4){ const ring=new THREE.Mesh(new THREE.TorusGeometry(s*1.7,s*0.06,8,64),
+    new THREE.MeshStandardMaterial({color:0x6a6f7a,roughness:0.9,metalness:0.3,flatShading:true}));
+    ring.rotation.x=Math.PI/2+(Math.random()-0.5)*0.7; ring.rotation.y=(Math.random()-0.5)*0.6; grp.add(ring); }
+  const a=Math.random()*Math.PI*2, r=PLANE_R+16+Math.random()*140, y=-10+Math.random()*26, incl=(Math.random()-0.5)*8;
+  grp.position.set(Math.cos(a)*r,y,Math.sin(a)*r);
+  grp.userData={spin:(Math.random()-0.5)*0.012,orb:{a,r,y,sp:(0.008+Math.random()*0.02)*(Math.random()<0.12?-1:1),incl,ph:Math.random()*6},crystalMat,base:1.6};
+  return grp; }
 
 function makePlatform(){ const grp=new THREE.Group();
   const disc=new THREE.Mesh(new THREE.CylinderGeometry(PLANE_R,PLANE_R*0.95,1.4,140),metal(0x11161f,0.55,0.85)); disc.position.y=-0.7; disc.receiveShadow=true; grp.add(disc);
@@ -294,10 +395,10 @@ function renderCards(cat){ const cards=document.getElementById('cards'); cards.i
 function selectType(type,card){ Sound.click(); if(buildType===type){cancelBuild();return;} deselect(); buildType=type; document.querySelectorAll('.card').forEach(c=>c.classList.remove('active')); if(card)card.classList.add('active'); if(ghost){scene.remove(ghost);ghost=null;} ghost=makeGhost(type); scene.add(ghost); }
 
 function wireControls(){ document.getElementById('raid').onclick=startRaid; document.getElementById('attack').onclick=startAttack; document.getElementById('return').onclick=()=>{ if(mode==='attack')endAttack(); };
-  const mute=document.getElementById('mute'); mute.onclick=()=>{ const m=Sound.toggleMute(); mute.textContent=m?'🔇 SOUND: OFF':'🔊 SOUND: ON'; syncSnd(); };
   const set=document.getElementById('settings'); document.getElementById('settings-btn').onclick=()=>{ set.style.display=(set.style.display==='block')?'none':'block'; }; document.getElementById('close-set').onclick=()=>{ set.style.display='none'; };
-  document.getElementById('snd').onclick=()=>{ const m=Sound.toggleMute(); mute.textContent=m?'🔇 SOUND: OFF':'🔊 SOUND: ON'; syncSnd(); };
+  document.getElementById('snd').onclick=()=>{ Sound.toggleMute(); syncSnd(); };
   document.getElementById('vol').oninput=(e)=>Sound.setVolume(e.target.value/100);
+  document.getElementById('skybtn').onclick=()=>{ if(skyLoading){toast('DOME STILL LOADING…');return;} Sound.click(); applySky(skyIndex+1); };
   document.getElementById('save').onclick=saveBase; document.getElementById('load').onclick=loadBase; document.getElementById('reset').onclick=resetBase; document.getElementById('recenter').onclick=recenterView;
   document.getElementById('help-x').onclick=()=>document.getElementById('help').style.display='none'; }
 function syncSnd(){ document.getElementById('snd').textContent=Sound.isMuted()?'OFF':'ON'; }
@@ -308,8 +409,12 @@ function fleetCap(){ let n=0; for(const b of buildings)if(b.userData.def&&b.user
 function updateHUD(){ const cap=capOf(); resources.energy=Math.min(resources.energy,cap); resources.crystal=Math.min(resources.crystal,cap);
   document.getElementById('energy').textContent=Math.floor(resources.energy);
   document.getElementById('crystal').textContent=Math.floor(resources.crystal);
-  document.getElementById('efill').style.width=(100*resources.energy/cap)+'%';
-  document.getElementById('cfill').style.width=(100*resources.crystal/cap)+'%';
+  document.getElementById('efill').style.height=(100*resources.energy/cap)+'%';
+  document.getElementById('cfill').style.height=(100*resources.crystal/cap)+'%';
+  document.getElementById('cell-energy').classList.toggle('full',resources.energy>=cap*0.98);
+  document.getElementById('cell-crystal').classList.toggle('full',resources.crystal>=cap*0.98);
+  document.getElementById('cell-energy').title=`Energy ${Math.floor(resources.energy)} / ${cap}`;
+  document.getElementById('cell-crystal').title=`Crystal ${Math.floor(resources.crystal)} / ${cap}`;
   const ext=buildings.filter(b=>b.userData.type==='extractor'||b.userData.type==='drill').reduce((s,b)=>s+b.userData.level,0);
   const rct=buildings.filter(b=>b.userData.type==='reactor'||b.userData.type==='solar').reduce((s,b)=>s+b.userData.level,0);
   document.getElementById('crate').textContent=ext?`+${ext*2}/s`:''; document.getElementById('erate').textContent=rct?`+${rct*3}/s`:''; if(selected)showInfo(selected); }
@@ -429,7 +534,9 @@ function animate(){ requestAnimationFrame(animate); const dt=Math.min(clock.getD
   sky.rotation.y+=dt*0.004; if(planet)planet.rotation.y+=dt*0.01;
   if(moon){moon.userData.a+=moon.userData.sp*dt;moon.position.set(Math.cos(moon.userData.a)*moon.userData.r,moon.userData.y,Math.sin(moon.userData.a)*moon.userData.r);}
   if(starFlare)starFlare.material.rotation+=dt*0.1;
-  for(const a of asteroids){a.rotation.y+=a.userData.spin;a.userData.orb.a+=a.userData.orb.sp*dt; a.position.set(Math.cos(a.userData.orb.a)*a.userData.orb.r,a.userData.orb.y,Math.sin(a.userData.orb.a)*a.userData.orb.r);}
+  for(const a of asteroids){ const u=a.userData; u.orb.a+=u.orb.sp*dt; a.rotation.y+=u.spin; a.rotation.x+=u.spin*0.6;
+    a.position.set(Math.cos(u.orb.a)*u.orb.r, u.orb.y+Math.sin(u.orb.a*1.5+u.orb.ph)*u.orb.incl, Math.sin(u.orb.a)*u.orb.r);
+    if(u.crystalMat)u.crystalMat.emissiveIntensity=u.base+Math.sin(t*1.8+u.orb.ph)*0.65; }
   for(const b of buildings)if(b.userData.update)b.userData.update(t);
   for(let i=deploying.length-1;i>=0;i--){const d=deploying[i];d.t+=dt;const k=Math.min(1,d.t/0.55),e=1-Math.pow(1-k,3); d.obj.scale.setScalar(0.01+e*0.99); d.obj.position.y=(1-e)*6; if(k>=1){d.obj.scale.setScalar(1);d.obj.position.copy(d.target);deploying.splice(i,1);}}
   if(raidActive) updateRaid(dt,t); else if(mode==='attack') updateAttack(dt,t);
