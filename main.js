@@ -5,6 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // ============================================================
 //  STELLAR CLASH — big base + categorized build + settings (offline)
@@ -40,7 +41,8 @@ const CATS = [['all','All'],['resource','Resources'],['defense','Defense'],['arm
 
 // ---- state ----
 let renderer, scene, camera, controls, composer, sky, initCam;
-let stationTex=null, planet=null, moon=null, starFlare=null, commandCenter=null;
+let stationTex=null, starFlare=null, commandCenter=null, platform=null, stars=null;
+const patrol=[];
 const clock = new THREE.Clock();
 const buildings=[], occupied=new Set(), interactives=[];
 const effects=[], enemies=[], fighters=[], projectiles=[], deploying=[], asteroids=[];
@@ -92,6 +94,110 @@ manager.onError=(url)=>showLoadError('asset: '+url);
 function showLoadError(msg){ const p=document.querySelector('#loader p'); if(p)p.textContent='ERROR: '+msg; console.error(msg); }
 
 // ============================================================
+//  NEBULA SKY DOMES (2 GLB skyboxes; classic jpg dome as hidden fallback)
+//  Domes retry on failure and are preloaded in the background so a
+//  flaky first request never leaves you on the fallback sky.
+// ============================================================
+const SKIES=[
+  {id:'deep',label:'DEEP',name:'DEEP NEBULA',file:'./3dmodels/alien_space_nebula_2_skybox.glb'},
+  {id:'core',label:'CORE',name:'ALIEN CORE', file:'./3dmodels/alien_space_nebula_1_skybox.glb'},
+];
+let skyIndex=0;
+try{ const saved=localStorage.getItem('stellar-sky'); const i=SKIES.findIndex(s=>s.id===saved); skyIndex=i>=0?i:0; }catch(e){}
+const skyCache={};
+let skyLoading=false, skyAttempts=0;
+
+function makeClassicSky(){ return new THREE.Mesh(new THREE.SphereGeometry(800,48,32),new THREE.MeshBasicMaterial({map:nebulaTex,side:THREE.BackSide,depthWrite:false,fog:false})); }
+
+// Reject textures that are flat/bright (e.g. a metallicRoughness map) — those would render as a white screen.
+function flatBright(tex){ try{ const img=tex&&tex.image; if(!img||!img.width)return false;
+  const cv=flatBright.cv||(flatBright.cv=document.createElement('canvas')); cv.width=32; cv.height=16;
+  const cx=cv.getContext('2d'); cx.drawImage(img,0,0,32,16); const d=cx.getImageData(0,0,32,16).data;
+  let l=0; for(let i=0;i<d.length;i+=4)l+=(0.299*d[i]+0.587*d[i+1]+0.114*d[i+2])/255;
+  return l/(d.length/4)>0.78; }catch(e){ return false; } }
+
+// Pick the panorama texture of a glTF material: baseColor map first, else the emissive map.
+function pickDomeTexture(sm){
+  const map=sm.map||null, emi=sm.emissiveMap||null;
+  if(map&&!flatBright(map))return map;
+  if(emi&&!flatBright(emi))return emi;
+  return null;
+}
+
+// Normalize a glTF skybox scene into an unlit, opaque back-side dome centered on the origin.
+// Returns null when no usable panorama texture is found.
+function prepareDome(gltf){
+  const src=gltf.scene||gltf.scenes[0];
+  if(!src)return null;
+  src.updateMatrixWorld(true);
+  const sphere=new THREE.Box3().setFromObject(src).getBoundingSphere(new THREE.Sphere());
+  const k=760/Math.max(sphere.radius,1e-6);           // outer layer ends up at r≈760, beyond any camera distance
+  let used=0;
+  src.traverse(o=>{
+    if(o.isLight||o.isCamera){ o.visible=false; return; }  // strip embedded sketchfab lights/cameras
+    if(!o.isMesh||!o.material)return;
+    const mats=Array.isArray(o.material)?o.material:[o.material];
+    let tex=null;
+    for(const sm of mats){ tex=pickDomeTexture(sm); if(tex)break; }
+    if(!tex)return;
+    const sm0=mats[0];
+    // baseColor-mapped domes (CORE) are shown at authored brightness; emissive-only domes (DEEP) keep their boost.
+    const st=(typeof sm0.emissiveIntensity==='number')?sm0.emissiveIntensity:1;
+    const boost=sm0.map?Math.min(st,1.05):Math.min(st,1.6);
+    const m=new THREE.MeshBasicMaterial({map:tex,color:new THREE.Color(boost,boost,boost),side:THREE.BackSide,depthWrite:false,fog:false});
+    m.transparent=false; m.opacity=1;                 // the sky is the backdrop — never blended/dimmed
+    o.material=m; o.frustumCulled=false; o.renderOrder=-10; used++;
+  });
+  if(!used)return null;
+  src.scale.setScalar(k);
+  const dome=new THREE.Group(); dome.name='skydome'; dome.add(src);
+  return dome;
+}
+
+function swapSky(dome){
+  if(sky)scene.remove(sky);
+  sky=dome; sky.rotation.y=Math.random()*Math.PI*2;
+  scene.add(sky);
+}
+
+function loadDome(def,onDone,onFail,onProgress){
+  new GLTFLoader().load(def.file,
+    (gltf)=>{ let dome=null; try{ dome=prepareDome(gltf); }catch(e){ console.warn('dome prep failed',def.file,e); }
+      if(dome)onDone(dome); else onFail(); },
+    onProgress,
+    (err)=>{ console.warn('sky load failed',def.file,err); onFail(); });
+}
+
+function applySky(idx,fromRetry){
+  skyIndex=((idx%SKIES.length)+SKIES.length)%SKIES.length;
+  const def=SKIES[skyIndex];
+  try{ localStorage.setItem('stellar-sky',def.id); }catch(e){}
+  const btn=document.getElementById('skybtn'); if(btn&&!skyLoading)btn.textContent=def.label;
+  if(skyCache[def.id]){ swapSky(skyCache[def.id]); return; }
+  if(skyLoading)return;                              // one dome download at a time
+  skyLoading=true; if(btn)btn.textContent='…';
+  if(!fromRetry)toast('LOADING '+def.name+' DOME…');
+  loadDome(def,
+    (dome)=>{ skyLoading=false; skyAttempts=0; skyCache[def.id]=dome;
+      if(SKIES[skyIndex].id===def.id){ swapSky(dome); if(btn)btn.textContent=def.label; toast(def.name+' ✔'); Sound.click(); }
+      preloadOtherDomes(); },
+    ()=>{ skyLoading=false;
+      if(skyAttempts<3){ skyAttempts++; if(btn)btn.textContent='RETRY '+skyAttempts;
+        setTimeout(()=>{ if(SKIES[skyIndex].id===def.id&&!skyCache[def.id])applySky(skyIndex,true); },1200); }
+      else{ skyAttempts=0; if(btn)btn.textContent=def.label;
+        if(SKIES[skyIndex].id===def.id){ swapSky(makeClassicSky()); toast('DOME FAILED — FALLBACK SKY'); } } },
+    (xhr)=>{ if(xhr.total&&btn)btn.textContent=Math.min(99,Math.round(xhr.loaded/xhr.total*100))+'%'; });
+}
+
+// Quietly fetch the remaining dome(s) so switching themes is instant.
+function preloadOtherDomes(){
+  const rest=SKIES.filter(s=>!skyCache[s.id]);
+  if(!rest.length)return;
+  const def=rest[0];
+  loadDome(def,(dome)=>{ skyCache[def.id]=dome; },()=>{}, ()=>{});
+}
+
+// ============================================================
 //  MATERIAL HELPERS
 // ============================================================
 const metal=(color,rough=0.4,met=0.92)=>new THREE.MeshStandardMaterial({color,roughness:rough,metalness:met,map:stationTex||null});
@@ -114,15 +220,14 @@ function buildScene(){
 
   scene=new THREE.Scene(); scene.background=new THREE.Color(0x02030a); scene.fog=new THREE.FogExp2(0x02030a,0.0016);
 
-  sky=new THREE.Mesh(new THREE.SphereGeometry(800,48,32),new THREE.MeshBasicMaterial({map:nebulaTex,side:THREE.BackSide,depthWrite:false,fog:false})); scene.add(sky);
+  sky=makeClassicSky(); scene.add(sky);                       // instant fallback dome, upgraded to GLB nebula below
   const pmrem=new THREE.PMREMGenerator(renderer);
   // CC0 HDRI (Poly Haven "dikhololo_night") → realistic image-based lighting + metal reflections
   new RGBELoader().load('./assets/hdri.hdr', (hdr)=>{ scene.environment=pmrem.fromEquirectangular(hdr).texture; hdr.dispose(); pmrem.dispose(); },
     undefined, ()=>{ scene.environment=pmrem.fromEquirectangular(nebulaTex).texture; });
 
-  scene.add(makeStarfield(3400,600));
-  planet=makePlanet(); scene.add(planet); moon=makeMoon(); scene.add(moon);
-  for(let i=0;i<26;i++){const a=makeAsteroid();asteroids.push(a);scene.add(a);}
+  stars=makeStarfield(3400,600); scene.add(stars);
+  for(let i=0;i<24;i++){const a=makeAsteroid();asteroids.push(a);scene.add(a);}
 
   scene.add(new THREE.HemisphereLight(0x335577,0x05070d,0.4));
   const star=new THREE.DirectionalLight(0xbfe6ff,2.6); star.position.set(60,90,40);
@@ -132,7 +237,9 @@ function buildScene(){
   starFlare=radialSprite('rgba(180,225,255,1)'); starFlare.scale.setScalar(110); starFlare.material.fog=false;
   starFlare.position.copy(star.position).multiplyScalar(6); scene.add(starFlare);
 
-  scene.add(makePlatform());
+  platform=makePlatform(); scene.add(platform);
+  // patrol interceptors circling the base
+  for(let i=0;i<3;i++){ const ship=createFighter(); patrol.push({m:ship,r:PLANE_R*(0.7+0.12*i),sp:0.22+0.06*i,ph:i*2.1,h:5+i*1.7}); scene.add(ship); }
   highlight=makeHighlight(); highlight.visible=false; scene.add(highlight);
   selRing=new THREE.Mesh(new THREE.TorusGeometry(CELL*0.62,0.07,12,48),new THREE.MeshBasicMaterial({color:0x39e6ff}));
   selRing.rotation.x=Math.PI/2; selRing.visible=false; scene.add(selRing);
@@ -150,6 +257,7 @@ function buildScene(){
 
   setupInput(); buildDock(); wireControls();
   preplaceCommand(); updateHUD();
+  applySky(skyIndex);                                          // load saved / default GLB nebula dome
   setInterval(tickIncome,1000);
   addEventListener('resize',onResize);
 }
@@ -162,29 +270,55 @@ function makeStarfield(count,radius){ const g=new THREE.BufferGeometry(); const 
   g.setAttribute('position',new THREE.BufferAttribute(pos,3)); g.setAttribute('color',new THREE.BufferAttribute(col,3));
   return new THREE.Points(g,new THREE.PointsMaterial({size:1.3,sizeAttenuation:true,vertexColors:true,transparent:true,opacity:0.9,depthWrite:false})); }
 
-function makePlanet(){ const grp=new THREE.Group();
-  const p=new THREE.Mesh(new THREE.SphereGeometry(220,96,96),new THREE.MeshStandardMaterial({map:planetTex,roughness:0.95,metalness:0.05,fog:false}));
-  p.position.set(-360,-210,-580); grp.add(p);
-  const atmo=new THREE.Mesh(new THREE.SphereGeometry(232,96,96),new THREE.ShaderMaterial({transparent:true,side:THREE.BackSide,blending:THREE.AdditiveBlending,fog:false,
-    uniforms:{c:{value:new THREE.Color(0x39a0ff)}},
-    vertexShader:`varying vec3 vN;void main(){vN=normalize(normalMatrix*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-    fragmentShader:`varying vec3 vN;uniform vec3 c;void main(){float i=pow(1.0-abs(vN.z),3.0);gl_FragColor=vec4(c,i*0.6);}`}));
-  atmo.position.copy(p.position); grp.add(atmo); return grp; }
-
-function makeMoon(){ const m=new THREE.Mesh(new THREE.SphereGeometry(26,32,32),new THREE.MeshStandardMaterial({color:0x8a93a3,roughness:1,metalness:0.05,flatShading:true}));
-  m.position.set(200,140,-300); m.userData={a:0,r:380,y:140,sp:0.05}; return m; }
-
-function makeAsteroid(){ const s=1+Math.random()*3.5, geo=new THREE.IcosahedronGeometry(s,1), p=geo.attributes.position;
-  for(let i=0;i<p.count;i++)p.setXYZ(i,p.getX(i)*(1+(Math.random()-0.5)*0.5),p.getY(i)*(1+(Math.random()-0.5)*0.5),p.getZ(i)*(1+(Math.random()-0.5)*0.5));
-  geo.computeVertexNormals(); const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0x3a3f4a,roughness:1,metalness:0.1,flatShading:true}));
-  const a=Math.random()*Math.PI*2,r=PLANE_R+12+Math.random()*110; m.position.set(Math.cos(a)*r,-3+Math.random()*12,Math.sin(a)*r);
-  m.userData={spin:(Math.random()-0.5)*0.01,orb:{a,r,y:m.position.y,sp:0.01+Math.random()*0.03}}; return m; }
+// ---- crystal-bearing asteroid planetoids ----
+const AST_ROCKS=[0x4a4237,0x3c434c,0x333a44,0x45413a,0x2e333d];
+const AST_PALS=[
+  {c:0xff8a3c,css:'rgba(255,138,60,1)'},   // amber ore
+  {c:0x39e6ff,css:'rgba(57,230,255,1)'},   // cyan crystal
+  {c:0x9b6bff,css:'rgba(155,107,255,1)'},  // void amethyst
+  {c:0x7dffb0,css:'rgba(125,255,176,1)'},  // verdanium
+];
+function makeAsteroid(){
+  const grp=new THREE.Group();
+  const s=1.1+Math.random()*3.4, seed=Math.random()*1000;
+  const geo=new THREE.IcosahedronGeometry(s,2), p=geo.attributes.position, v=new THREE.Vector3(), n=new THREE.Vector3();
+  for(let i=0;i<p.count;i++){ v.fromBufferAttribute(p,i); n.copy(v).normalize();
+    const d=0.78 + 0.30*(0.5+0.5*Math.sin(n.x*2.3+seed)*Math.sin(n.y*2.9+seed*1.3))
+              + 0.14*(0.5+0.5*Math.sin(n.y*4.7+seed*2.1)*Math.sin(n.z*4.1+seed*0.7))
+              - 0.20*Math.pow(Math.max(0,Math.sin(n.z*1.6+seed*0.3)),8);   // dig an impact crater
+    v.copy(n).multiplyScalar(s*d); p.setXYZ(i,v.x,v.y,v.z); }
+  geo.computeVertexNormals();
+  const rock=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:AST_ROCKS[Math.floor(Math.random()*AST_ROCKS.length)],roughness:0.96,metalness:0.12,flatShading:true}));
+  grp.add(rock);
+  // glowing crystal veins poking out of the rock (one shared pulsing material per asteroid)
+  const pal=AST_PALS[Math.floor(Math.random()*AST_PALS.length)];
+  const crystalMat=new THREE.MeshStandardMaterial({color:0x0c1016,emissive:pal.c,emissiveIntensity:1.6,roughness:0.25,metalness:0.1});
+  const shardGeo=new THREE.OctahedronGeometry(1,0), up=new THREE.Vector3(0,1,0), dir=new THREE.Vector3();
+  const nShards=2+Math.floor(Math.random()*3);
+  for(let i=0;i<nShards;i++){ dir.set(Math.random()-0.5,Math.random()-0.5,Math.random()-0.5).normalize();
+    const len=s*(0.45+Math.random()*0.5), w=len*(0.22+Math.random()*0.15);
+    const shard=new THREE.Mesh(shardGeo,crystalMat);
+    shard.position.copy(dir).multiplyScalar(s*0.78);
+    shard.quaternion.setFromUnitVectors(up,dir);
+    shard.rotateX((Math.random()-0.5)*0.6); shard.rotateZ((Math.random()-0.5)*0.6);
+    shard.scale.set(w,len,w); grp.add(shard); }
+  // soft aura + debris ring on the big ones
+  const aura=radialSprite(pal.css); aura.material.opacity=0.16; aura.scale.setScalar(s*4.5); grp.add(aura);
+  if(s>3.4){ const ring=new THREE.Mesh(new THREE.TorusGeometry(s*1.7,s*0.06,8,64),
+    new THREE.MeshStandardMaterial({color:0x6a6f7a,roughness:0.9,metalness:0.3,flatShading:true}));
+    ring.rotation.x=Math.PI/2+(Math.random()-0.5)*0.7; ring.rotation.y=(Math.random()-0.5)*0.6; grp.add(ring); }
+  const a=Math.random()*Math.PI*2, r=PLANE_R+16+Math.random()*140, y=-10+Math.random()*26, incl=(Math.random()-0.5)*8;
+  grp.position.set(Math.cos(a)*r,y,Math.sin(a)*r);
+  grp.userData={spin:(Math.random()-0.5)*0.012,orb:{a,r,y,sp:(0.008+Math.random()*0.02)*(Math.random()<0.12?-1:1),incl,ph:Math.random()*6},crystalMat,base:1.6};
+  return grp; }
 
 function makePlatform(){ const grp=new THREE.Group();
   const disc=new THREE.Mesh(new THREE.CylinderGeometry(PLANE_R,PLANE_R*0.95,1.4,140),metal(0x11161f,0.55,0.85)); disc.position.y=-0.7; disc.receiveShadow=true; grp.add(disc);
   const top=new THREE.Mesh(new THREE.CylinderGeometry(PLANE_R*0.98,PLANE_R*0.98,0.06,140),new THREE.MeshStandardMaterial({map:stationTex,roughness:0.6,metalness:0.7})); top.position.y=0; top.receiveShadow=true; grp.add(top);
   const rim=new THREE.Mesh(new THREE.TorusGeometry(PLANE_R,0.24,16,160),glow(0x39e6ff,2.8)); rim.rotation.x=Math.PI/2; rim.position.y=0.06; grp.add(rim);
   for(let i=0;i<12;i++){ const a=(i/12)*Math.PI*2; const strut=new THREE.Mesh(new THREE.CylinderGeometry(0.7,1.1,9,12),metal(0x0c0f15,0.6,0.9)); strut.position.set(Math.cos(a)*PLANE_R*0.7,-5.5,Math.sin(a)*PLANE_R*0.7); strut.rotation.z=Math.cos(a)*0.1; strut.rotation.x=-Math.sin(a)*0.1; grp.add(strut); }
+  const thrusters=[]; for(let i=0;i<4;i++){ const a=(i/4)*Math.PI*2+0.4; const th=radialSprite('rgba(120,215,255,1)'); th.position.set(Math.cos(a)*PLANE_R*0.82,-2.4,Math.sin(a)*PLANE_R*0.82); th.scale.setScalar(4.5); grp.add(th); thrusters.push(th); }
+  grp.userData={rim,thrusters};
   const grid=new THREE.Mesh(new THREE.PlaneGeometry(PLANE_R*2,PLANE_R*2),new THREE.MeshBasicMaterial({map:makeGridTexture(),transparent:true,blending:THREE.AdditiveBlending,depthWrite:false})); grid.rotation.x=-Math.PI/2; grid.position.y=0.05; grp.add(grid); return grp; }
 
 function makeGridTexture(){ const size=1024,cv=document.createElement('canvas'); cv.width=cv.height=size; const ctx=cv.getContext('2d'); const half=(GRID/2)*CELL,toPx=w=>((w+half)/(2*half))*size;
@@ -256,7 +390,7 @@ function setupInput(){ const el=renderer.domElement; let down=null;
   el.addEventListener('pointerdown',e=>{down={x:e.clientX,y:e.clientY,t:performance.now()};});
   el.addEventListener('pointerup',e=>{ if(!down)return; const moved=Math.hypot(e.clientX-down.x,e.clientY-down.y),quick=performance.now()-down.t<350; down=null; if(moved>6||!quick)return; setPointer(e); if(buildType){const h=raycastCell(); if(h&&tryPlace(h.i,h.j)){} else if(h)toast('PAD OCCUPIED');} else selectAtPointer(); });
   el.addEventListener('contextmenu',e=>{e.preventDefault();cancelBuild();});
-  addEventListener('keydown',e=>{if(e.key==='Escape')cancelBuild();}); }
+  addEventListener('keydown',e=>{if(e.key==='Escape'){cancelBuild();closeFleetPanel();}}); }
 
 function setPointer(e){ const r=renderer.domElement.getBoundingClientRect(); pointer.x=((e.clientX-r.left)/r.width)*2-1; pointer.y=-((e.clientY-r.top)/r.height)*2+1; }
 function raycastCell(){ raycaster.setFromCamera(pointer,camera); const p=new THREE.Vector3(); if(!raycaster.ray.intersectPlane(groundPlane,p))return null; const {i,j}=worldToCell(p.x,p.z); return inBounds(i,j)?{i,j}:null; }
@@ -293,11 +427,14 @@ function renderCards(cat){ const cards=document.getElementById('cards'); cards.i
   for(const [type,def] of Object.entries(BUILDINGS)){ if(cat!=='all'&&def.cat!==cat)continue; const card=document.createElement('div'); card.className='card'; card.dataset.type=type; card.innerHTML=`<div class="em">${def.em}</div><div class="nm">${def.name}</div><div class="cost"><b>${def.cost.energy}⚡</b> ${def.cost.crystal}◆</div>`; card.onclick=()=>selectType(type,card); cards.appendChild(card); } }
 function selectType(type,card){ Sound.click(); if(buildType===type){cancelBuild();return;} deselect(); buildType=type; document.querySelectorAll('.card').forEach(c=>c.classList.remove('active')); if(card)card.classList.add('active'); if(ghost){scene.remove(ghost);ghost=null;} ghost=makeGhost(type); scene.add(ghost); }
 
-function wireControls(){ document.getElementById('raid').onclick=startRaid; document.getElementById('attack').onclick=startAttack; document.getElementById('return').onclick=()=>{ if(mode==='attack')endAttack(); };
-  const mute=document.getElementById('mute'); mute.onclick=()=>{ const m=Sound.toggleMute(); mute.textContent=m?'🔇 SOUND: OFF':'🔊 SOUND: ON'; syncSnd(); };
+function wireControls(){ document.getElementById('raid').onclick=startRaid; document.getElementById('attack').onclick=openFleetPanel; document.getElementById('return').onclick=()=>{ if(mode==='attack')endAttack(); };
+  document.getElementById('fleet-go').onclick=()=>{ Sound.click(); closeFleetPanel(); startAttack(); };
+  document.getElementById('fleet-cancel').onclick=()=>{ Sound.click(); closeFleetPanel(); };
+  document.getElementById('fleet-retreat').onclick=()=>{ if(mode==='attack')endAttack(); };
   const set=document.getElementById('settings'); document.getElementById('settings-btn').onclick=()=>{ set.style.display=(set.style.display==='block')?'none':'block'; }; document.getElementById('close-set').onclick=()=>{ set.style.display='none'; };
-  document.getElementById('snd').onclick=()=>{ const m=Sound.toggleMute(); mute.textContent=m?'🔇 SOUND: OFF':'🔊 SOUND: ON'; syncSnd(); };
+  document.getElementById('snd').onclick=()=>{ Sound.toggleMute(); syncSnd(); };
   document.getElementById('vol').oninput=(e)=>Sound.setVolume(e.target.value/100);
+  document.getElementById('skybtn').onclick=()=>{ if(skyLoading){toast('DOME STILL LOADING…');return;} Sound.click(); applySky(skyIndex+1); };
   document.getElementById('save').onclick=saveBase; document.getElementById('load').onclick=loadBase; document.getElementById('reset').onclick=resetBase; document.getElementById('recenter').onclick=recenterView;
   document.getElementById('help-x').onclick=()=>document.getElementById('help').style.display='none'; }
 function syncSnd(){ document.getElementById('snd').textContent=Sound.isMuted()?'OFF':'ON'; }
@@ -310,6 +447,10 @@ function updateHUD(){ const cap=capOf(); resources.energy=Math.min(resources.ene
   document.getElementById('crystal').textContent=Math.floor(resources.crystal);
   document.getElementById('efill').style.width=(100*resources.energy/cap)+'%';
   document.getElementById('cfill').style.width=(100*resources.crystal/cap)+'%';
+  document.getElementById('cell-energy').classList.toggle('full',resources.energy>=cap*0.98);
+  document.getElementById('cell-crystal').classList.toggle('full',resources.crystal>=cap*0.98);
+  document.getElementById('cell-energy').title=`Energy ${Math.floor(resources.energy)} / ${cap}`;
+  document.getElementById('cell-crystal').title=`Crystal ${Math.floor(resources.crystal)} / ${cap}`;
   const ext=buildings.filter(b=>b.userData.type==='extractor'||b.userData.type==='drill').reduce((s,b)=>s+b.userData.level,0);
   const rct=buildings.filter(b=>b.userData.type==='reactor'||b.userData.type==='solar').reduce((s,b)=>s+b.userData.level,0);
   document.getElementById('crate').textContent=ext?`+${ext*2}/s`:''; document.getElementById('erate').textContent=rct?`+${rct*3}/s`:''; if(selected)showInfo(selected); }
@@ -318,7 +459,7 @@ function pulse(id){ const el=document.getElementById(id).closest('.rescell'); if
 let toastT; function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),1400); }
 
 // ============================================================
-//  BARACKS / STARPORT — train friendly interceptors
+//  BARRACKS / STARPORT — train friendly interceptors
 // ============================================================
 function trainFighter(){ if(!selected||!(selected.userData.def&&selected.userData.def.trains))return; if(fighters.length>=fleetCap()){toast('FLEET FULL');return;} const cost={energy:60,crystal:30}; if(resources.energy<cost.energy||resources.crystal<cost.crystal){toast('NEED RESOURCES');Sound.error();return;} resources.energy-=cost.energy; resources.crystal-=cost.crystal; spawnFighter(selected.position.clone()); Sound.upgrade(); updateHUD(); }
 function spawnFighter(home){ const m=createFighter(); const a=Math.random()*Math.PI*2; m.position.set(home.x+Math.cos(a)*3,2.4,home.z+Math.sin(a)*3); scene.add(m); fighters.push({mesh:m,hp:90,maxHp:90,cd:0,home,phase:Math.random()*6}); }
@@ -334,7 +475,7 @@ function resetBase(){ clearBase(); preplaceCommand(); resources.energy=1400; res
 // ============================================================
 //  RAID / DEFENSE
 // ============================================================
-function startRaid(){ if(raidActive||mode==='attack')return; const defN=buildings.filter(b=>DEF_TYPES.includes(b.userData.type)).length; const barN=buildings.filter(b=>b.userData.def&&b.userData.def.trains).length; if(defN+barN===0){toast('BUILD DEFENSE FIRST!');Sound.error();return;} raidActive=true; wave++; const n=6+wave*2; for(let i=0;i<n;i++)spawnDrone(); document.getElementById('raid').disabled=true; document.getElementById('attack').style.display='none'; Sound.success(); banner(`⚠ WAVE ${wave} — ${enemies.length} HOSTILES INBOUND`,'#ff8a3c'); }
+function startRaid(){ if(raidActive||mode==='attack')return; closeFleetPanel(); const defN=buildings.filter(b=>DEF_TYPES.includes(b.userData.type)).length; const barN=buildings.filter(b=>b.userData.def&&b.userData.def.trains).length; if(defN+barN===0){toast('BUILD DEFENSE FIRST!');Sound.error();return;} raidActive=true; wave++; const n=6+wave*2; for(let i=0;i<n;i++)spawnDrone(); document.getElementById('raid').disabled=true; document.getElementById('attack').style.display='none'; Sound.success(); banner(`⚠ WAVE ${wave} — ${enemies.length} HOSTILES INBOUND`,'#ff8a3c'); }
 function spawnDrone(){ const g=new THREE.Group(); const body=part(new THREE.ConeGeometry(0.55,1.6,8),new THREE.MeshStandardMaterial({color:0x551015,metalness:0.6,roughness:0.4,emissive:0x220000}),0,0,0); body.rotation.x=Math.PI/2; g.add(body); g.add(part(new THREE.BoxGeometry(1.6,0.12,0.6),metal(0x331015),0,0,0)); g.add(part(new THREE.SphereGeometry(0.26,12,8),glow(0xff2b3c,3),0,0,0.55,false)); g.add(part(new THREE.SphereGeometry(0.2,10,8),glow(0xff6a00,2),0,0,-0.85,false)); const a=Math.random()*Math.PI*2,r=PLANE_R+26+Math.random()*18; g.position.set(Math.cos(a)*r,3+Math.random()*6,Math.sin(a)*r); g.userData={hp:120+wave*18,maxHp:120+wave*18,speed:4+wave*0.4,target:pickTarget(),bob:Math.random()*6}; scene.add(g); enemies.push(g); }
 function pickTarget(){ const valid=buildings.filter(b=>b.userData.type!=='command'&&b.userData.hp>0); return valid.length?valid[Math.floor(Math.random()*valid.length)]:null; }
 
@@ -358,8 +499,23 @@ function destroyBuilding(b){ if(b===commandCenter)return; occupied.delete(key(Ma
 function angDiff(a,b){ let d=b-a; while(d>Math.PI)d-=Math.PI*2; while(d<-Math.PI)d+=Math.PI*2; return d; }
 
 // ============================================================
-//  OFFENSE — attack an AI enemy outpost
+//  OFFENSE — pick fleet, attack an AI enemy outpost
 // ============================================================
+function openFleetPanel(){
+  Sound.click(); cancelBuild(); closeFleetPanel();
+  const list=document.getElementById('fleet-list'); list.innerHTML='';
+  const empty=document.getElementById('fleet-empty'), go=document.getElementById('fleet-go');
+  if(!fighters.length){ empty.style.display='block'; go.disabled=true; }
+  else{
+    empty.style.display='none'; go.disabled=false;
+    fighters.forEach((f,i)=>{ if(i>=14)return; const c=document.createElement('div'); c.className='fchip';
+      c.innerHTML=`<span>🛰</span><span>INTERCEPTOR</span><span class="hp"><i style="width:${Math.max(0,Math.round(100*f.hp/f.maxHp))}%"></i></span>`; list.appendChild(c); });
+    if(fighters.length>14){ const more=document.createElement('div'); more.className='fchip'; more.innerHTML=`<span>+${fighters.length-14} MORE IN HANGAR</span>`; list.appendChild(more); }
+  }
+  document.getElementById('fleet-panel').style.display='block';
+}
+function closeFleetPanel(){ const p=document.getElementById('fleet-panel'); if(p)p.style.display='none'; }
+
 function generateOutpost(){
   enemyGroup=new THREE.Group(); enemyGroup.position.copy(battleCenter); scene.add(enemyGroup);
   enemyPlatform=new THREE.Mesh(new THREE.CylinderGeometry(13,12,1.2,64),metal(0x1a1320,0.5,0.8));
@@ -381,8 +537,11 @@ function startAttack(){
   battleCenter.set(0,0,-PLANE_R*5);
   generateOutpost();
   controls.target.copy(battleCenter); camera.position.set(battleCenter.x+34,battleCenter.y+26,battleCenter.z+44); controls.update();
-  document.getElementById('raid').style.display='none'; document.getElementById('attack').style.display='none';
-  document.getElementById('return').style.display=''; toast('⚔ DEPLOYING FLEET'); Sound.success();
+  document.getElementById('raid').style.display='none'; document.getElementById('attack').style.display='none'; document.getElementById('return').style.display='none';
+  document.getElementById('build-toggle').style.display='none';
+  const bp=document.getElementById('build-panel'); bp.style.display='none'; document.getElementById('build-toggle').classList.remove('active');
+  document.getElementById('fleet-bar').style.display='flex';
+  toast('⚔ DEPLOYING FLEET'); Sound.success();
 }
 function updateAttack(dt,t){
   if(mode!=='attack')return; battleTimer-=dt;
@@ -393,6 +552,8 @@ function updateAttack(dt,t){
       if(tu.cd<=0){ tu.cd=(tu.kind==='missile'?1.6:tu.kind==='sniper'?2.2:tu.kind==='pulse'?0.18:0.42); tu.barrel.getWorldPosition(tmpV); spawnLaser(tmpV,nearest.mesh.position,0xff3b5c); Sound.shoot(); nearest.hp-=tu.dmg;
         if(nearest.hp<=0){ scene.remove(nearest.mesh); const fi=fighters.indexOf(nearest); if(fi>=0)fighters.splice(fi,1); } } } }
   const alive=enemyBuildings.filter(b=>b.userData.hp>0).length;
+  const hp=fighters.reduce((s,f)=>s+Math.max(0,f.hp),0), mx=fighters.reduce((s,f)=>s+f.maxHp,0)||1;
+  const fst=document.getElementById('fleet-status'); if(fst)fst.textContent=`🛰 FLEET ${fighters.length} · ⛨ ${Math.round(100*hp/mx)}%`;
   if(alive===0||fighters.length===0||battleTimer<=0){ endAttack(); return; }
   banner(`⚔ RAIDING OUTPOST — ENEMY: ${alive} · FLEET: ${fighters.length}`,'#ff8a3c');
 }
@@ -408,6 +569,8 @@ function endAttack(){
   const hc=commandCenter?commandCenter.position:new THREE.Vector3(); fighters.forEach((f,i)=>{ f.home=new THREE.Vector3(hc.x+Math.cos(i)*4,2.4,hc.z+Math.sin(i)*4); });
   if(initCam){ camera.position.copy(initCam); controls.target.set(0,2,0); controls.update(); }
   document.getElementById('raid').style.display=''; document.getElementById('attack').style.display=''; document.getElementById('return').style.display='none';
+  document.getElementById('build-toggle').style.display='';
+  document.getElementById('fleet-bar').style.display='none'; closeFleetPanel();
   banner(win?`✓ OUTPOST RAIDED  +${Math.floor(loot.energy)}⚡ +${Math.floor(loot.crystal)}◆`:`⚔ RETREAT — LOOTED +${Math.floor(loot.energy)}⚡ +${Math.floor(loot.crystal)}◆`, win?'#7dffb0':'#ff8a3c');
   setTimeout(()=>{const b=document.getElementById('banner');if(b)b.style.display='none';},3000);
   loot={energy:0,crystal:0}; Sound.success();
@@ -426,10 +589,16 @@ function banner(text,color){ const b=document.getElementById('banner'); b.textCo
 //  LOOP
 // ============================================================
 function animate(){ requestAnimationFrame(animate); const dt=Math.min(clock.getDelta(),0.05),t=clock.elapsedTime;
-  sky.rotation.y+=dt*0.004; if(planet)planet.rotation.y+=dt*0.01;
-  if(moon){moon.userData.a+=moon.userData.sp*dt;moon.position.set(Math.cos(moon.userData.a)*moon.userData.r,moon.userData.y,Math.sin(moon.userData.a)*moon.userData.r);}
+  sky.rotation.y+=dt*0.004;
   if(starFlare)starFlare.material.rotation+=dt*0.1;
-  for(const a of asteroids){a.rotation.y+=a.userData.spin;a.userData.orb.a+=a.userData.orb.sp*dt; a.position.set(Math.cos(a.userData.orb.a)*a.userData.orb.r,a.userData.orb.y,Math.sin(a.userData.orb.a)*a.userData.orb.r);}
+  for(const a of asteroids){ const u=a.userData; u.orb.a+=u.orb.sp*dt; a.rotation.y+=u.spin; a.rotation.x+=u.spin*0.6;
+    a.position.set(Math.cos(u.orb.a)*u.orb.r, u.orb.y+Math.sin(u.orb.a*1.5+u.orb.ph)*u.orb.incl, Math.sin(u.orb.a)*u.orb.r);
+    if(u.crystalMat)u.crystalMat.emissiveIntensity=u.base+Math.sin(t*1.8+u.orb.ph)*0.65; }
+  // living-base ambience: rim pulse, thruster flicker, star twinkle, patrol ships
+  if(platform&&platform.userData.rim)platform.userData.rim.material.emissiveIntensity=2.6+Math.sin(t*1.7)*0.8;
+  if(platform&&platform.userData.thrusters)platform.userData.thrusters.forEach((th,i)=>{ th.material.opacity=0.3+0.22*(0.5+0.5*Math.sin(t*6.3+i*1.7)); });
+  if(stars)stars.material.opacity=0.78+0.14*Math.sin(t*0.9);
+  for(const p of patrol){ const a=t*p.sp+p.ph; p.m.position.set(Math.cos(a)*p.r,p.h+Math.sin(a*2.3)*0.9,Math.sin(a)*p.r); p.m.rotation.y=-a; p.m.rotation.z=Math.sin(a)*0.3; }
   for(const b of buildings)if(b.userData.update)b.userData.update(t);
   for(let i=deploying.length-1;i>=0;i--){const d=deploying[i];d.t+=dt;const k=Math.min(1,d.t/0.55),e=1-Math.pow(1-k,3); d.obj.scale.setScalar(0.01+e*0.99); d.obj.position.y=(1-e)*6; if(k>=1){d.obj.scale.setScalar(1);d.obj.position.copy(d.target);deploying.splice(i,1);}}
   if(raidActive) updateRaid(dt,t); else if(mode==='attack') updateAttack(dt,t);
