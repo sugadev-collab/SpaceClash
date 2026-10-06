@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>STELLAR CLASH — Space Base Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --cyan:#39e6ff; --cyan-dim:#1a7d8c; --orange:#ff8a3c; --red:#ff3b5c; --bg:#03060f;
+    --panel:rgba(8,18,34,0.72); --border:rgba(57,230,255,0.35);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
+    font-family:'Rajdhani',sans-serif;color:#dff6ff;user-select:none;-webkit-user-select:none;}
+  #app{position:fixed;inset:0;} canvas{display:block;}
+
+  .hud{position:fixed;pointer-events:none;z-index:10;}
+  .hud *{pointer-events:auto;}
+
+  #topbar{top:0;left:0;right:0;display:flex;justify-content:flex-start;align-items:flex-start;padding:14px 18px;}
+  .title{font-family:'Orbitron',sans-serif;font-weight:900;letter-spacing:3px;font-size:20px;color:#fff;
+    text-shadow:0 0 14px var(--cyan);padding:6px 16px;border:1px solid var(--border);border-radius:10px;
+    background:var(--panel);backdrop-filter:blur(6px);}
+  .title small{display:block;font-family:'Rajdhani';font-weight:600;letter-spacing:2px;font-size:10px;color:var(--cyan);opacity:.8;}
+
+  /* CoC-style compact resource bar */
+  #resbar{top:14px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:11;}
+  .rescell{position:relative;display:flex;align-items:center;gap:7px;background:var(--panel);
+    border:1px solid var(--border);border-radius:18px;padding:5px 14px;backdrop-filter:blur(6px);
+    overflow:hidden;min-width:140px;transition:transform .2s;}
+  .rescell .ic{font-size:14px;z-index:1;}
+  .rescell .val{font-family:'Orbitron';font-weight:700;font-size:14px;z-index:1;}
+  .rescell .rate{font-size:10px;opacity:.65;z-index:1;letter-spacing:.5px;}
+  .rescell .fill{position:absolute;left:0;bottom:0;height:100%;width:0%;opacity:.22;z-index:0;transition:width .3s;}
+  .rescell.energy .fill{background:#ff8a3c;} .rescell.crystal .fill{background:#39e6ff;}
+  .rescell.pulse{animation:pulse .4s;}
+  @keyframes pulse{0%{transform:scale(1)}45%{transform:scale(1.14)}100%{transform:scale(1)}}
+
+  #controls{right:18px;top:84px;width:172px;}
+  .btn{font-family:'Orbitron';letter-spacing:1px;font-size:11px;padding:10px 12px;border-radius:9px;cursor:pointer;
+    border:1px solid var(--border);background:var(--panel);color:#dff6ff;backdrop-filter:blur(6px);transition:.15s;width:100%;margin-bottom:8px;}
+  .btn:hover{border-color:var(--cyan);box-shadow:0 0 16px rgba(57,230,255,.4);}
+  .btn.raid{border-color:var(--orange);color:#ffd9a8;}
+  .btn.raid:hover{box-shadow:0 0 18px rgba(255,138,60,.55);}
+  .btn.atk{border-color:#9b6bff;color:#d9c8ff;}
+  .btn.atk:hover{box-shadow:0 0 18px rgba(155,107,255,.55);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;}
+
+  #banner{position:fixed;top:70px;left:50%;transform:translateX(-50%);display:none;text-align:center;
+    font-family:'Orbitron';letter-spacing:2px;color:#ffd2a8;background:rgba(40,12,4,.62);border:1px solid var(--orange);
+    padding:8px 22px;border-radius:10px;z-index:20;text-shadow:0 0 10px var(--orange);}
+
+  #settings{right:18px;top:340px;width:204px;background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:14px;backdrop-filter:blur(6px);display:none;z-index:20;}
+  #settings h4{font-family:'Orbitron';font-size:12px;letter-spacing:1px;color:#fff;margin-bottom:12px;}
+  #settings .r{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:12px;}
+  #settings input[type=range]{width:104px;accent-color:var(--cyan);}
+  #settings .btn2{width:100%;margin-top:6px;padding:9px;border-radius:8px;cursor:pointer;border:1px solid var(--border);
+    background:rgba(57,230,255,.08);color:#dff6ff;font-family:'Orbitron';font-size:10px;letter-spacing:1px;transition:.15s;}
+  #settings .btn2:hover{border-color:var(--cyan);background:rgba(57,230,255,.2);}
+  #settings .btn2.danger{border-color:#ff5b6e;background:rgba(255,91,110,.1);color:#ffb3bd;}
+  #settings .btn2.danger:hover{background:rgba(255,91,110,.25);}
+
+  #info{left:18px;top:120px;width:212px;background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:14px;backdrop-filter:blur(6px);display:none;}
+  #info h3{font-family:'Orbitron';font-size:14px;color:#fff;letter-spacing:1px;}
+  #info .row{display:flex;justify-content:space-between;font-size:13px;margin-top:6px;}
+  #info .row span:last-child{color:var(--cyan);font-weight:700;}
+  .hpbar{height:8px;border-radius:5px;background:rgba(255,255,255,.12);margin-top:8px;overflow:hidden;}
+  .hpbar i{display:block;height:100%;background:linear-gradient(90deg,#39e6ff,#7dffb0);width:100%;transition:width .2s;}
+  #train{display:none;width:100%;margin-top:10px;padding:8px;border:1px solid #7dffb0;background:rgba(125,255,176,.12);
+    color:#d6ffe6;border-radius:8px;cursor:pointer;font-family:'Orbitron';letter-spacing:1px;font-size:11px;}
+  #info .acts{display:flex;gap:8px;margin-top:10px;}
+  #info button{flex:1;padding:8px;border-radius:8px;cursor:pointer;font-family:'Orbitron';letter-spacing:1px;font-size:10px;transition:.15s;border:1px solid;}
+  #upgrade{border-color:var(--cyan);background:rgba(57,230,255,.12);color:#bff6ff;}
+  #upgrade:hover{background:rgba(57,230,255,.28);} #upgrade:disabled{opacity:.4;cursor:not-allowed;}
+  #demolish{border-color:#ff5b6e;background:rgba(255,91,110,.12);color:#ffb3bd;}
+  #demolish:hover{background:rgba(255,91,110,.28);}
+
+  #help{left:18px;bottom:118px;max-width:232px;background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:12px 14px;backdrop-filter:blur(6px);font-size:12.5px;line-height:1.55;}
+  #help b{color:var(--cyan);} #help .x{position:absolute;top:6px;right:10px;cursor:pointer;opacity:.6;}
+
+  #build-panel{position:fixed;bottom:66px;left:50%;transform:translateX(-50%);display:none;flex-direction:column;
+    align-items:center;gap:8px;z-index:15;max-width:94vw;}
+  #tabs{display:flex;gap:6px;}
+  .tab{font-family:'Orbitron';font-size:10px;letter-spacing:1px;padding:6px 13px;border-radius:20px;cursor:pointer;
+    border:1px solid var(--border);background:var(--panel);color:#dff6ff;backdrop-filter:blur(6px);}
+  .tab.active{border-color:var(--cyan);color:#fff;box-shadow:0 0 12px rgba(57,230,255,.4);}
+  #cards{display:flex;gap:8px;overflow-x:auto;padding:9px 11px;background:var(--panel);border:1px solid var(--border);
+    border-radius:12px;backdrop-filter:blur(8px);max-width:94vw;}
+  #cards::-webkit-scrollbar{height:6px;} #cards::-webkit-scrollbar-thumb{background:var(--cyan-dim);border-radius:3px;}
+  .card{width:74px;flex:0 0 auto;background:rgba(8,18,34,.55);border:1px solid var(--border);border-radius:10px;
+    padding:6px 4px;text-align:center;cursor:pointer;transition:.12s;}
+  .card:hover{transform:translateY(-3px);border-color:var(--cyan);box-shadow:0 0 14px rgba(57,230,255,.35);}
+  .card.active{border-color:var(--orange);box-shadow:0 0 16px rgba(255,138,60,.5);}
+  .card .em{font-size:22px;line-height:1;}
+  .card .nm{font-family:'Orbitron';font-size:8.5px;letter-spacing:.4px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .card .cost{font-size:9px;opacity:.82;margin-top:1px;}
+
+  #build-toggle{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:16;font-family:'Orbitron';
+    letter-spacing:1px;font-size:13px;padding:11px 28px;border-radius:24px;cursor:pointer;border:1px solid var(--border);
+    background:var(--panel);color:#fff;backdrop-filter:blur(6px);box-shadow:0 0 16px rgba(57,230,255,.3);}
+  #build-toggle.active{border-color:var(--orange);box-shadow:0 0 18px rgba(255,138,60,.5);}
+
+  #loader{position:fixed;inset:0;background:radial-gradient(circle at 50% 40%,#0a1730,#03060f);display:grid;place-items:center;z-index:50;transition:opacity .6s;}
+  #loader .box{text-align:center;}
+  #loader .ring{width:64px;height:64px;border:3px solid rgba(57,230,255,.2);border-top-color:var(--cyan);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 18px;}
+  #loader h1{font-family:'Orbitron';letter-spacing:4px;font-size:22px;color:#fff;text-shadow:0 0 18px var(--cyan);}
+  #loader p{margin-top:8px;letter-spacing:2px;font-size:12px;color:var(--cyan);opacity:.8;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #toast{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(255,91,110,.16);border:1px solid #ff5b6e;
+    color:#ffd2d8;padding:10px 20px;border-radius:10px;font-family:'Orbitron';letter-spacing:1px;opacity:0;transition:.25s;z-index:40;pointer-events:none;}
+  #toast.show{opacity:1;}
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="topbar" class="hud">
+    <div class="title">STELLAR CLASH<small>DEEP-SPACE BASE COMMAND</small></div>
+  </div>
+
+  <div id="resbar" class="hud">
+    <div class="rescell energy"><span class="ic">⚡</span><span class="val" id="energy">0</span><span class="rate" id="erate"></span><div class="fill" id="efill"></div></div>
+    <div class="rescell crystal"><span class="ic">◆</span><span class="val" id="crystal">0</span><span class="rate" id="crate"></span><div class="fill" id="cfill"></div></div>
+  </div>
+
+  <div id="controls" class="hud">
+    <button class="btn raid" id="raid">⚔ SIMULATE RAID</button>
+    <button class="btn atk" id="attack">🛰 ATTACK OUTPOST</button>
+    <button class="btn" id="return" style="display:none">↩ RETURN</button>
+    <button class="btn" id="settings-btn">⚙ SETTINGS</button>
+    <button class="btn" id="recenter">⌖ FRAME BASE</button>
+    <button class="btn" id="mute">🔊 SOUND: ON</button>
+  </div>
+
+  <div id="settings" class="hud">
+    <h4>⚙ SETTINGS</h4>
+    <div class="r"><span>Sound</span><button class="btn2" id="snd" style="width:auto;margin:0;padding:6px 12px;">ON</button></div>
+    <div class="r"><span>Volume</span><input id="vol" type="range" min="0" max="100" value="60" /></div>
+    <button class="btn2" id="save">💾 SAVE BASE</button>
+    <button class="btn2" id="load">📂 LOAD BASE</button>
+    <button class="btn2 danger" id="reset">♻ RESET BASE</button>
+    <button class="btn2" id="close-set" style="margin-top:10px;">CLOSE</button>
+  </div>
+
+  <div id="banner"></div>
+
+  <div id="info" class="hud">
+    <h3 id="info-name">Building</h3>
+    <div class="row"><span>Level</span><span id="info-lvl">1</span></div>
+    <div class="row"><span>Integrity</span><span id="info-hp">100</span></div>
+    <div class="row"><span>Output</span><span id="info-out">—</span></div>
+    <div class="hpbar"><i id="info-hpbar"></i></div>
+    <button id="train">TRAIN INTERCEPTOR</button>
+    <div class="acts">
+      <button id="upgrade">UPGRADE</button>
+      <button id="demolish">REMOVE</button>
+    </div>
+  </div>
+
+  <div id="help" class="hud">
+    <span class="x" id="help-x">✕</span>
+    <b>COMMAND BRIEFING</b><br/>
+    • Drag orbit · scroll zoom · 🔨 BUILD → pick a structure<br/>
+    • Click a structure to upgrade / remove / train<br/>
+    • ⚔ SIMULATE RAID = defend your base<br/>
+    • 🛰 ATTACK OUTPOST = send your fleet to raid (train ships at Barracks/Starport first!)<br/>
+    • Save your base in ⚙ Settings
+  </div>
+
+  <div id="build-panel" class="hud">
+    <div id="tabs"></div>
+    <div id="cards"></div>
+  </div>
+  <button id="build-toggle" class="hud">🔨 BUILD</button>
+
+  <div id="loader">
+    <div class="box"><div class="ring"></div><h1>STELLAR CLASH</h1><p>INITIALIZING ORBITAL COMMAND…</p></div>
+  </div>
+  <div id="toast"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./libs/three.module.js",
+      "three/addons/": "./libs/addons/"
+    }
+  }
+  </script>
+  <script>
+    window.__gameStarted = false;
+    setTimeout(function () { if (!window.__gameStarted) {
+      var p = document.querySelector('#loader p'); if (p) p.textContent = 'LOAD FAILED — right-click → reload, or check console.';
+    } }, 9000);
+    window.addEventListener('error', function (e) {
+      var p = document.querySelector('#loader p'); if (p && !window.__gameStarted) p.textContent = 'ERROR: ' + (e.message || e.filename);
+    });
+  </script>
+  <script type="module" src="./main.js?v=6"></script>
+</body>
+</html>
