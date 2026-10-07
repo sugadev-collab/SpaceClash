@@ -1,0 +1,82 @@
+{
+  "results": [
+    {
+      "name": "19 original buildings have five distinct finite tier fittings",
+      "ok": true
+    },
+    {
+      "name": "Camps and workshops scale capacity",
+      "ok": true
+    },
+    {
+      "name": "Busy builders block construction without charging",
+      "ok": true
+    },
+    {
+      "name": "Four troop types train with correct HP and capacity",
+      "ok": true
+    },
+    {
+      "name": "Locked troop levels cannot train",
+      "ok": true
+    },
+    {
+      "name": "Full camps block training without charging",
+      "ok": true
+    },
+    {
+      "name": "Mixed fleet and visual tiers persist on save/load",
+      "ok": true
+    },
+    {
+      "name": "Version 2 interceptor saves remain readable",
+      "ok": true
+    },
+    {
+      "name": "Malformed and unknown troop saves are rejected",
+      "ok": true
+    },
+    {
+      "name": "Both original nebula variants switch",
+      "ok": true
+    },
+    {
+      "name": "Hangar opens with a live original 3D preview",
+      "ok": true
+    },
+    {
+      "name": "Troop cards update preview and stats",
+      "ok": true
+    },
+    {
+      "name": "Dismissal frees troop space",
+      "ok": true
+    },
+    {
+      "name": "Escape closes the native modal",
+      "ok": true
+    },
+    {
+      "name": "Mixed fleet can start and retreat from assault",
+      "ok": true
+    },
+    {
+      "name": "Raid cleanup releases projectiles",
+      "ok": true
+    },
+    {
+      "name": "Mobile has no horizontal page or dialog overflow",
+      "ok": true
+    },
+    {
+      "name": "Reduced motion keeps decorative sky stationary",
+      "ok": true
+    },
+    {
+      "name": "No JS errors, shader errors or HTTP failures",
+      "ok": true
+    }
+  ],
+  "errors": [],
+  "requests": []
+}

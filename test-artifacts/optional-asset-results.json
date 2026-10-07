@@ -1,0 +1,26 @@
+{
+  "results": [
+    {
+      "name": "catfish_mech_low-poly_animated.glb",
+      "meshes": 54,
+      "skins": 54,
+      "clips": 1,
+      "finite": true
+    },
+    {
+      "name": "cool_alien_spaceship_by_jungle_jim.glb",
+      "meshes": 114,
+      "skins": 0,
+      "clips": 0,
+      "finite": true
+    },
+    {
+      "name": "32_sci-fi_materials_pack.glb",
+      "meshes": 4,
+      "skins": 0,
+      "clips": 0,
+      "finite": true
+    }
+  ],
+  "errors": []
+}

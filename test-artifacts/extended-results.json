@@ -1,0 +1,29 @@
+{
+  "results": [
+    {
+      "name": "All building factories render",
+      "ok": true
+    },
+    {
+      "name": "Reduced motion disables decorative deck sweep",
+      "ok": true
+    },
+    {
+      "name": "Upgrade increases level",
+      "ok": true
+    },
+    {
+      "name": "Demolition frees cell",
+      "ok": true
+    },
+    {
+      "name": "HQ defeat ends raid instead of hanging",
+      "ok": true
+    },
+    {
+      "name": "Extended tests have no JavaScript exceptions",
+      "ok": true
+    }
+  ],
+  "errors": []
+}

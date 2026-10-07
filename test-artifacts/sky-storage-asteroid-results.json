@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "name": "DEEP loads actual licensed GLB without fallback",
+      "ok": true
+    },
+    {
+      "name": "CORE uses panorama map and unlit opaque material",
+      "ok": true
+    },
+    {
+      "name": "Rapid background switching commits only final choice",
+      "ok": true
+    },
+    {
+      "name": "Asteroids have craters and LOD; no rings or neon sprites",
+      "ok": true
+    },
+    {
+      "name": "Sky, mute and volume survive page reload",
+      "ok": true
+    },
+    {
+      "name": "Visible credit link exists",
+      "ok": true
+    },
+    {
+      "name": "Credits include author, source and license links",
+      "ok": true
+    }
+  ],
+  "errors": []
+}

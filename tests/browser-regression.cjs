@@ -1,0 +1,34 @@
+const path=require('path');const ROOT=path.resolve(__dirname,'..');const OUT=path.join(ROOT,'test-artifacts');require('fs').mkdirSync(OUT,{recursive:true});
+const {chromium}=require('playwright');const fs=require('fs');
+(async()=>{
+const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||undefined,headless:true,args:['--no-sandbox','--enable-unsafe-swiftshader','--use-angle=swiftshader']});
+const page=await browser.newPage({viewport:{width:1440,height:900}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+await page.route('**/main.js*',route=>route.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(ROOT,'main.js'),'utf8')+`\nwindow.testGame={get buildings(){return buildings},get fighters(){return fighters},get deploying(){return deploying},get enemyBuildings(){return enemyBuildings},get scene(){return scene},get resources(){return resources},get enemies(){return enemies},get raidActive(){return raidActive},get mode(){return mode},get selected(){return selected},select(o){selected=o;showInfo(o)},selectType,tryPlace,saveBase,loadBase,validateSave,clearBase,startRaid,endRaid,startAttack,endAttack,tickIncome,capOf,updateHUD};`}));
+await page.goto(process.env.GAME_URL||'http://localhost:8000');await page.waitForFunction(()=>window.__gameStarted,{timeout:30000});await page.waitForTimeout(1500);
+const results=[];function check(name,ok){results.push({name,ok});if(!ok)throw Error(name)}
+check('HQ initializes',await page.evaluate(()=>testGame.buildings.length===1&&testGame.buildings[0].position.x===0));
+check('Deployment retains cell and starts at destination X/Z',await page.evaluate(()=>{testGame.selectType('solar');testGame.tryPlace(13,10);return testGame.buildings[1].position.x===7.2||Math.abs(testGame.buildings[1].position.x-7.2)<.001}));
+await page.waitForFunction(()=>testGame.deploying.length===0,{timeout:20000});
+check('Correct solar income rate',await page.evaluate(()=>{let e=testGame.resources.energy;testGame.tickIncome();return testGame.resources.energy===e+2&&document.querySelector('#erate').textContent==='+2/s'}));
+check('Placement cannot exceed circular deck',await page.evaluate(()=>!testGame.tryPlace(0,0)));
+await page.evaluate(()=>{testGame.selectType('barracks');testGame.tryPlace(7,10);});await page.waitForFunction(()=>testGame.deploying.length===0,{timeout:20000});
+await page.evaluate(()=>testGame.select(testGame.buildings.find(b=>b.userData.type==='barracks')));await page.click('#train');
+check('Training adds fighter',await page.evaluate(()=>testGame.fighters.length===1));
+await page.evaluate(()=>testGame.saveBase());await page.evaluate(()=>testGame.clearBase());await page.evaluate(()=>testGame.loadBase());
+check('Save/load retains base and fleet',await page.evaluate(()=>testGame.buildings.length===3&&testGame.fighters.length===1));
+check('Corrupt save does not destroy current base',await page.evaluate(()=>{localStorage.setItem('stellar-clash','{"res":{"energy":42,"crystal":42},"buildings":[{"type":"bad","i":2,"j":2,"level":1}]}');testGame.loadBase();return testGame.buildings.length===3}));
+await page.evaluate(()=>{testGame.selectType('turret');testGame.tryPlace(10,13);});await page.waitForFunction(()=>testGame.deploying.length===0,{timeout:20000});
+await page.evaluate(()=>{testGame.select(testGame.buildings.find(b=>b.userData.type==='turret'));testGame.startRaid()});
+check('Raids launch and edits lock',await page.evaluate(()=>{let n=testGame.buildings.length;testGame.loadBase();return testGame.raidActive&&testGame.enemies.length===8&&testGame.buildings.length===n}));
+await page.evaluate(()=>testGame.endRaid(false));
+check('Raid cleanup and HQ restoration',await page.evaluate(()=>testGame.enemies.length===0&&!testGame.raidActive&&testGame.buildings[0].userData.hp===testGame.buildings[0].userData.maxHp));
+await page.evaluate(()=>testGame.startAttack());await page.waitForTimeout(2000);
+check('Attack builds enemy outpost',await page.evaluate(()=>testGame.mode==='attack'&&testGame.enemyBuildings.length>0));await page.waitForTimeout(500);await page.screenshot({animations:'disabled',path:path.join(OUT,'attack.png')});
+await page.evaluate(()=>{window.enemyRefs=[...testGame.enemyBuildings];testGame.endAttack()});
+check('Retreat removes all outpost meshes and returns ships',await page.evaluate(()=>testGame.mode==='base'&&window.enemyRefs.every(b=>!b.parent)&&testGame.fighters.every(f=>f.mesh.position.distanceTo(f.home)<5)));
+await page.click('#build-toggle');await page.waitForTimeout(500);await page.screenshot({animations:'disabled',path:path.join(OUT,'build-desktop.png')});await page.click('#build-toggle');await page.click('#settings-btn');await page.waitForTimeout(500);await page.screenshot({animations:'disabled',path:path.join(OUT,'settings-desktop.png')});
+await page.click('#close-set');await page.evaluate(()=>testGame.select(testGame.buildings.find(b=>b.userData.type==='barracks')));await page.waitForTimeout(500);check('Building detail panel visible',await page.evaluate(()=>getComputedStyle(document.getElementById('info')).display!=='none'));await page.screenshot({animations:'disabled',path:path.join(OUT,'info-desktop.png')});
+await page.setViewportSize({width:390,height:844});await page.waitForTimeout(500);await page.screenshot({animations:'disabled',path:path.join(OUT,'mobile-info.png')});await page.click('#build-toggle');await page.waitForTimeout(500);await page.screenshot({animations:'disabled',path:path.join(OUT,'mobile-build.png')});await page.click('#build-toggle');await page.click('#settings-btn');await page.waitForTimeout(500);await page.screenshot({animations:'disabled',path:path.join(OUT,'mobile-settings.png')});
+check('No JavaScript exceptions',errors.length===0);
+fs.writeFileSync(path.join(OUT,'test-results.json'),JSON.stringify({results,errors},null,2));console.log(JSON.stringify({results,errors},null,2));await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});

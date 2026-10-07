@@ -1,0 +1,120 @@
+{
+  "models": [
+    {
+      "type": "command",
+      "good": true,
+      "triangles": 6326,
+      "meshes": 14
+    },
+    {
+      "type": "extractor",
+      "good": true,
+      "triangles": 6310,
+      "meshes": 14
+    },
+    {
+      "type": "reactor",
+      "good": true,
+      "triangles": 5566,
+      "meshes": 9
+    },
+    {
+      "type": "solar",
+      "good": true,
+      "triangles": 1490,
+      "meshes": 10
+    },
+    {
+      "type": "drill",
+      "good": true,
+      "triangles": 2986,
+      "meshes": 10
+    },
+    {
+      "type": "storage",
+      "good": true,
+      "triangles": 2510,
+      "meshes": 9
+    },
+    {
+      "type": "wall",
+      "good": true,
+      "triangles": 674,
+      "meshes": 8
+    },
+    {
+      "type": "turret",
+      "good": true,
+      "triangles": 4154,
+      "meshes": 16
+    },
+    {
+      "type": "pulse",
+      "good": true,
+      "triangles": 4406,
+      "meshes": 12
+    },
+    {
+      "type": "missile",
+      "good": true,
+      "triangles": 7626,
+      "meshes": 16
+    },
+    {
+      "type": "cannon",
+      "good": true,
+      "triangles": 4966,
+      "meshes": 16
+    },
+    {
+      "type": "tesla",
+      "good": true,
+      "triangles": 14054,
+      "meshes": 10
+    },
+    {
+      "type": "sniper",
+      "good": true,
+      "triangles": 3246,
+      "meshes": 17
+    },
+    {
+      "type": "shield",
+      "good": true,
+      "triangles": 6028,
+      "meshes": 10
+    },
+    {
+      "type": "barracks",
+      "good": true,
+      "triangles": 5554,
+      "meshes": 11
+    },
+    {
+      "type": "starport",
+      "good": true,
+      "triangles": 6566,
+      "meshes": 12
+    },
+    {
+      "type": "camp",
+      "good": true,
+      "triangles": 5598,
+      "meshes": 13
+    },
+    {
+      "type": "builder",
+      "good": true,
+      "triangles": 5490,
+      "meshes": 13
+    },
+    {
+      "type": "habitat",
+      "good": true,
+      "triangles": 5446,
+      "meshes": 11
+    }
+  ],
+  "inspectButton": "pass",
+  "errors": []
+}

@@ -1,0 +1,57 @@
+{
+  "results": [
+    {
+      "name": "HQ initializes",
+      "ok": true
+    },
+    {
+      "name": "Deployment retains cell and starts at destination X/Z",
+      "ok": true
+    },
+    {
+      "name": "Correct solar income rate",
+      "ok": true
+    },
+    {
+      "name": "Placement cannot exceed circular deck",
+      "ok": true
+    },
+    {
+      "name": "Training adds fighter",
+      "ok": true
+    },
+    {
+      "name": "Save/load retains base and fleet",
+      "ok": true
+    },
+    {
+      "name": "Corrupt save does not destroy current base",
+      "ok": true
+    },
+    {
+      "name": "Raids launch and edits lock",
+      "ok": true
+    },
+    {
+      "name": "Raid cleanup and HQ restoration",
+      "ok": true
+    },
+    {
+      "name": "Attack builds enemy outpost",
+      "ok": true
+    },
+    {
+      "name": "Retreat removes all outpost meshes and returns ships",
+      "ok": true
+    },
+    {
+      "name": "Building detail panel visible",
+      "ok": true
+    },
+    {
+      "name": "No JavaScript exceptions",
+      "ok": true
+    }
+  ],
+  "errors": []
+}

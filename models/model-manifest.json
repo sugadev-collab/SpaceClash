@@ -1,0 +1,124 @@
+{
+  "format": "glTF 2.0 binary; static neutral poses",
+  "models": [
+    {
+      "type": "command",
+      "triangles": 6314,
+      "meshBatches": 13,
+      "bytes": 635036,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "extractor",
+      "triangles": 6298,
+      "meshBatches": 13,
+      "bytes": 634048,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "reactor",
+      "triangles": 5554,
+      "meshBatches": 8,
+      "bytes": 558268,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "solar",
+      "triangles": 1478,
+      "meshBatches": 9,
+      "bytes": 353204,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "drill",
+      "triangles": 2974,
+      "meshBatches": 9,
+      "bytes": 312576,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "storage",
+      "triangles": 2498,
+      "meshBatches": 8,
+      "bytes": 265104,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "wall",
+      "triangles": 662,
+      "meshBatches": 7,
+      "bytes": 91464,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "turret",
+      "triangles": 4142,
+      "meshBatches": 15,
+      "bytes": 425192,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "pulse",
+      "triangles": 4394,
+      "meshBatches": 11,
+      "bytes": 396916,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "missile",
+      "triangles": 7614,
+      "meshBatches": 15,
+      "bytes": 761140,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "cannon",
+      "triangles": 4954,
+      "meshBatches": 15,
+      "bytes": 455248,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "tesla",
+      "triangles": 14042,
+      "meshBatches": 9,
+      "bytes": 1321536,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "sniper",
+      "triangles": 3234,
+      "meshBatches": 16,
+      "bytes": 341508,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "shield",
+      "triangles": 6016,
+      "meshBatches": 9,
+      "bytes": 475720,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "barracks",
+      "triangles": 5542,
+      "meshBatches": 10,
+      "bytes": 564604,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "starport",
+      "triangles": 6554,
+      "meshBatches": 11,
+      "bytes": 656808,
+      "glbRoundtrip": "pass"
+    },
+    {
+      "type": "habitat",
+      "triangles": 5434,
+      "meshBatches": 10,
+      "bytes": 549120,
+      "glbRoundtrip": "pass"
+    }
+  ]
+}
