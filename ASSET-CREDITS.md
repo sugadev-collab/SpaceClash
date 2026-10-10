@@ -47,3 +47,16 @@ License terms: https://sketchfab.com/licenses
 CC BY 4.0 permits commercial use and modifications with attribution, a license link and a change notice. Do not imply endorsement or add restrictions/DRM that prevent permitted reuse of the CC assets. Keep credits with optimized derivatives. Notification or separate permission is not required by CC BY 4.0; a thank-you/link is welcome. The license gives no warranties and does not clear unrelated trademark, privacy or other third-party rights. This inventory is not legal advice.
 
 Three.js r160 and addons: MIT; retain `libs/LICENSE.txt`. Original building/asteroid/troop/procedural assets and project code have not been re-licensed as part of this update.
+
+## Quaternius fleet and modular details (used in this game)
+
+- Creator: **Quaternius** — https://quaternius.com/
+- Ultimate Spaceships Pack: https://quaternius.com/packs/ultimatespaceships.html
+- Ultimate Modular Sci-Fi Pack: https://quaternius.com/packs/ultimatemodularscifi.html
+- Both official pages list **CC0 1.0 Universal**, permitting personal/commercial use, modification and redistribution without attribution or notification requirements: https://creativecommons.org/publicdomain/zero/1.0/
+- Voluntary credit retained; no creator endorsement or third-party rights warranty is implied.
+- Striker hull is used for Aster interceptor, with cyan-painted texture, original sensor spine, twin rail pods and heat vent. Bob is used for Kestrel siege bomber with original payload pods. Imperial is used for Atlas strike cruiser with original command fittings. Ship hull vertices, UVs and indices are retained. Textures resized 2048→1024 and JPEG Q92 compressed; materials adjusted. Exhaust and fittings are original project additions. These are **adaptations**, not wholly original hull designs.
+- Sentinel remains the original project drone. Game stats and unlock rules are unchanged.
+- Modular Crate and Vent 1 downloaded from the CC0 Godot mirror: https://github.com/Malcolmnixon/Quaternius-Modular-Scifi-Pack — conversion author Malcolm Nixon. Official Drive downloads returned quota-exceeded pages. Selected ArrayMesh resources converted to GLB with corrected winding, reconstructed face normals and simplified PBR colors; placed as dock/workshop decorations and an interceptor vent.
+- Local license texts: `assets/quaternius/LICENSE-spaceships.txt`, `assets/quaternius/LICENSE-modular.txt`.
+- Reproducible conversion: `tools/prepare-quaternius.py`; editable runtime design: `enhancements/units.js`; component resource sources: `assets/quaternius/source/`.

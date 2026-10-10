@@ -1,4 +1,4 @@
-# STELLAR CLASH — Licensed Skyboxes / Modular Saves Edition
+# STELLAR CLASH — Quaternius Fleet / Licensed Skyboxes Edition
 
 Standalone Three.js game, with no backend or build step. All runtime assets and libraries are local. This release restores the two uploaded Jungle Jim backgrounds under their verified, listed CC BY 4.0 licenses and includes visible attribution.
 
@@ -83,3 +83,15 @@ storage/
 ```
 
 A future server can import the pure rules/schema without loading Three.js. The current adapter/service is synchronous because localStorage is synchronous. An asynchronous HTTP/IndexedDB adapter will also need `await` in the thin save/load UI handlers; it is not a drop-in synchronous network implementation. No endpoint/authentication/session system has been created. A real backend should be authoritative and validate purchases/combat, not blindly trust a browser snapshot.
+
+## Quaternius fleet edition
+
+Three active troop hulls now use adapted CC0 Quaternius models: **Aster interceptor / Striker**, **Kestrel siege bomber / Bob**, **Atlas strike cruiser / Imperial**. Stats, troop type IDs, unlocking, training, saved fleets and combat rules are unchanged. Sentinel remains original. The Aster is a customized existing hull, not a wholly original mesh.
+
+Open **http://localhost:8000/fleet-gallery.html** for the orbitable 3D fleet atelier with an **Export GLB** button. Complete assembled designs are also in `assets/quaternius/designs/`. Edit paint preparation in `tools/prepare-quaternius.py` and fittings in `enhancements/units.js`. The exporter embeds textures in each GLB.
+
+Only three chosen hulls and two modular parts are loaded, from local files. Ship textures are capped at 1024 and JPEG-compressed for this distant strategy-game view. Mesh geometry/UVs retained. Crates and vents add small decorative dock/workshop details; placement bounds remain unchanged. No whole modular interior or full pack is loaded.
+
+`enhancements/asset-library.js` preloads the local templates once before startup. Instances own geometry/materials and share textures; dismissal/reset does not dispose shared textures. If an asset is missing, the original procedural troop mesh is used; a console warning identifies the missing file. No external network download is needed at runtime.
+
+Official packs list CC0 and allow commercial use. Courtesy credits and source/modification notices are included on the visible credits page and in ASSET-CREDITS.md. Source uploads remain untouched. Existing CC BY skybox attribution still applies.

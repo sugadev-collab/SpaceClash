@@ -1,0 +1,58 @@
+[
+  {
+    "file": "alien_space_nebula_2_skybox.glb",
+    "original_bytes": 8317796,
+    "optimized_bytes": 2396256,
+    "geometry_and_animation_bytes_unchanged": true,
+    "images": [
+      {
+        "image": 0,
+        "from": [
+          4096,
+          2048
+        ],
+        "to": [
+          4096,
+          2048
+        ],
+        "bytes": 2333101,
+        "encoding": "image/jpeg"
+      }
+    ]
+  },
+  {
+    "file": "alien_space_nebula_1_skybox.glb",
+    "original_bytes": 19265924,
+    "optimized_bytes": 4882960,
+    "geometry_and_animation_bytes_unchanged": true,
+    "images": [
+      {
+        "image": 0,
+        "from": [
+          4096,
+          2048
+        ],
+        "to": [
+          4096,
+          2048
+        ],
+        "bytes": 4849731,
+        "encoding": "image/jpeg"
+      },
+      {
+        "image": 1,
+        "from": [
+          4096,
+          2048
+        ],
+        "to": [
+          1,
+          1
+        ],
+        "bytes": 69,
+        "encoding": "image/png",
+        "note": "Unused packed PBR channel replaced; no panorama pixels removed"
+      }
+    ]
+  }
+]

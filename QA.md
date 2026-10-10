@@ -30,3 +30,12 @@ The GLB optimizer compares all non-image buffer bytes and mesh/node/accessor/ski
 Serve the game locally over HTTP. Developer tests need Node/Playwright and an installed browser; set `CHROMIUM_PATH` when needed. They are not game/runtime dependencies. Set `OPTIONAL_ASSETS_DIR` to the extracted optional-pack folder for model validation. Tests inject temporary state hooks; the shipped game exposes no debug controller.
 
 Travel is presentation-only, not an actual arrival mission or backend feature. The local adapter is synchronous; a future asynchronous backend will require awaiting the save/load service and server-side authority/validation. No backend was created.
+
+## Quaternius fleet edition
+
+- Browser gameplay regression: four troop types, capacity/unlocks/costs, dismissal, mixed-fleet save/load, legacy saves, assault/retreat, raid cleanup, tiers and mobile hangar passed. Browser save-service tests passed.
+- `tests/browser-quaternius.cjs`: all four designs finite, three imported hulls active, original Sentinel retained; complete GLBs exported and reloaded with local embedded textures; missing Striker asset falls back to original model. Expected abort error in the deliberate fallback test is excluded from normal-load errors.
+- Source mesh/node/accessor definitions and every non-image bufferView byte range match the three uploaded glTF sources. Textures/materials are intentionally changed. See `test-artifacts/quaternius-geometry-validation.json`.
+- Visual inspection: desktop/mobile fleet atelier, hangar, credits and settings; roof-mounted vent and dock/workshop crates. Camera auto-fits model bounds to prevent narrow-screen clipping. Fitting geometry is batched by material.
+- No CDN or external asset requests at runtime. CC0 creator/source/license notices visible in credits. Existing CC BY background attribution retained.
+- Synthetic Chromium/SwiftShader tests are not a benchmark for every GPU, phone or browser. The assembled fleet GLBs are static models; engine scale animations and game behavior are runtime code, not embedded animation clips.

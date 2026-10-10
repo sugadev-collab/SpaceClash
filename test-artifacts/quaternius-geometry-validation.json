@@ -1,0 +1,20 @@
+[
+  {
+    "source": "Striker",
+    "hullBytesPreserved": true,
+    "portable": true,
+    "fileBytes": 564952
+  },
+  {
+    "source": "Bob",
+    "hullBytesPreserved": true,
+    "portable": true,
+    "fileBytes": 346592
+  },
+  {
+    "source": "Imperial",
+    "hullBytesPreserved": true,
+    "portable": true,
+    "fileBytes": 461368
+  }
+]

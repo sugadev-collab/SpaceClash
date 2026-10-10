@@ -1,0 +1,94 @@
+{
+  "checks": [
+    {
+      "type": "interceptor",
+      "name": "Interceptor",
+      "custom": true,
+      "finite": true,
+      "triangles": 5062,
+      "exhaust": true
+    },
+    {
+      "type": "bomber",
+      "name": "Siege Bomber",
+      "custom": true,
+      "finite": true,
+      "triangles": 1222,
+      "exhaust": true
+    },
+    {
+      "type": "cruiser",
+      "name": "Strike Cruiser",
+      "custom": true,
+      "finite": true,
+      "triangles": 2898,
+      "exhaust": true
+    },
+    {
+      "type": "sentinel",
+      "name": "Sentinel Drone",
+      "custom": false,
+      "finite": true,
+      "triangles": 510,
+      "exhaust": true
+    },
+    {
+      "name": "gallery-mobile-no-overflow",
+      "ok": true
+    },
+    {
+      "type": "interceptor",
+      "valid": true,
+      "size": [
+        1.2843651867559152,
+        0.7050037035724206,
+        2.4339999934434893
+      ]
+    },
+    {
+      "type": "bomber",
+      "valid": true,
+      "size": [
+        2.65,
+        0.5135698525609226,
+        1.7312639804575576
+      ]
+    },
+    {
+      "type": "cruiser",
+      "valid": true,
+      "size": [
+        1.3751827145851838,
+        1.0963629415724319,
+        3.5379999934434894
+      ]
+    },
+    {
+      "type": "sentinel",
+      "valid": true,
+      "size": [
+        1.7699999809265137,
+        1.0949999690055847,
+        2.3249999552965166
+      ]
+    },
+    {
+      "name": "modular-details-storage",
+      "ok": true
+    },
+    {
+      "name": "modular-details-starport",
+      "ok": true
+    },
+    {
+      "name": "modular-details-builder",
+      "ok": true
+    },
+    {
+      "name": "missing-hull-fallback",
+      "ok": true
+    }
+  ],
+  "errors": [],
+  "bad": []
+}

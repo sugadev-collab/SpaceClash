@@ -6,7 +6,7 @@ import {createSaveService} from './storage/save-state.js';
 import {SKYBOXES,loadSkybox} from './enhancements/skyboxes.js';
 import {createAsteroid} from './enhancements/asteroids.js';
 import {createCruiseEffects} from './enhancements/cruise.js';
-import { UNIT_DEFS, createUnit } from './enhancements/units.js';
+import { UNIT_DEFS, createUnit, preloadFleetAssets, assetStatus } from './enhancements/units.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -104,7 +104,7 @@ async function applySky(idx){
  }finally{if(token===skyRequest)skyLoading=false;}
 }
 function showLoadError(msg){const el=document.querySelector('#loader p');if(el)el.textContent='ERROR: '+msg;console.error(msg);}
-setTimeout(()=>{try{buildScene();animate();window.__gameStarted=true;const l=document.getElementById('loader');l.style.opacity='0';setTimeout(()=>l.remove(),700);}catch(e){showLoadError(e.message);}},0);
+setTimeout(async()=>{try{await preloadFleetAssets();buildScene();animate();window.__gameStarted=true;const l=document.getElementById('loader');l.style.opacity='0';setTimeout(()=>l.remove(),700);}catch(e){showLoadError(e.message);}},0);
 // ============================================================
 //  MATERIAL HELPERS
 // ============================================================
@@ -600,7 +600,7 @@ function openHangar(){
  setUnitPreview();renderHangar();Sound.click();
 }
 function closeHangar(){const d=document.getElementById('hangar');if(!d?.open)return;d.close();if(previewModel){disposeObject(previewModel);previewModel=null;}hangarReturnFocus?.focus();}
-function setUnitPreview(){if(!previewScene)return;if(previewModel)disposeObject(previewModel);previewModel=createUnit(hangarType);previewScene.add(previewModel);}
+function setUnitPreview(){if(!previewScene)return;if(previewModel)disposeObject(previewModel);previewModel=createUnit(hangarType);previewScene.add(previewModel);const bounds=new THREE.Box3().setFromObject(previewModel),size=bounds.getSize(new THREE.Vector3());const distance=Math.max(size.x,size.y,size.z)*1.3;previewCamera.position.set(distance*.7,distance*.5,distance*.86);previewCamera.lookAt(bounds.getCenter(new THREE.Vector3()));}
 function renderHangar(){
  if(!document.getElementById('hangar')?.open)return;
  const d=UNIT_DEFS[hangarType],facility=selected?.userData.def?.trains?selected:null;
