@@ -4,6 +4,8 @@ A browser-based 3D space-base strategy prototype built with JavaScript, Three.js
 
 **[Play Voidward Command](https://mygamesorg.github.io/SpaceClash/)**
 
+Developer portfolio: **[Elakumar Sugatheepan](https://sugadev-collab.github.io/myportfolio/)**
+
 **Status:** Public portfolio prototype, deployed on GitHub Pages. Basic gameplay and manual save/load have been checked by the developer; cross-device regression testing is still pending.
 
 ## Run locally
